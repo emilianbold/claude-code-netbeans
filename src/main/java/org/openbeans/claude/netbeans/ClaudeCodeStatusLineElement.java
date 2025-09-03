@@ -1,8 +1,8 @@
 package org.openbeans.claude.netbeans;
 
 import java.awt.Component;
+import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
-import java.awt.event.MouseListener;
 import javax.swing.JLabel;
 import org.openide.awt.StatusLineElementProvider;
 import org.openide.util.Lookup;
@@ -29,25 +29,16 @@ public class ClaudeCodeStatusLineElement implements StatusLineElementProvider {
         statusLabel.setToolTipText("Claude Code: Initializing...");
         
         // Add mouse listener for click interactions (future enhancement)
-        statusLabel.addMouseListener(new MouseListener() {
+        statusLabel.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
                 // Could show status dialog or perform action
             }
             
             @Override
-            public void mousePressed(MouseEvent e) {}
-            
-            @Override
-            public void mouseReleased(MouseEvent e) {}
-            
-            @Override
             public void mouseEntered(MouseEvent e) {
                 updateTooltip();
             }
-            
-            @Override
-            public void mouseExited(MouseEvent e) {}
         });
         
         updateStatusDisplay();
