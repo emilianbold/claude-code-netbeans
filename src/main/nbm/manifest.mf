@@ -1,0 +1,8 @@
+Manifest-Version: 1.0
+OpenIDE-Module: org.openbeans.claude.netbeans
+OpenIDE-Module-Localizing-Bundle: org/openbeans/claude/netbeans/Bundle.properties
+OpenIDE-Module-Install: org/openbeans/claude/netbeans/ClaudeCodeInstaller.class
+AutoUpdate-Show-In-Client: true
+OpenIDE-Module-Display-Category: Tools
+OpenIDE-Module-Short-Description: Claude Code integration for NetBeans IDE
+OpenIDE-Module-Long-Description: Provides integration between Claude Code and NetBeans IDE using the Model Context Protocol (MCP). Enables Claude Code to interact with NetBeans through file operations, project navigation, and code analysis.
