@@ -782,6 +782,7 @@ public class NetBeansMCPHandler {
             }
             
             // If tab not found in open tabs
+            LOGGER.warning("Tab not found for close request: '" + tabName + "'");
             return responseBuilder.createToolResponse("Tab not currently open: " + tabName);
             
         } catch (Exception e) {
@@ -1136,6 +1137,7 @@ public class NetBeansMCPHandler {
             // Read the old file content
             File oldFile = new File(oldFilePath);
             if (!oldFile.exists()) {
+                LOGGER.warning("Old file does not exist for diff: " + oldFilePath);
                 return responseBuilder.createToolResponse("Old file does not exist: " + oldFilePath);
             }
             
@@ -1143,6 +1145,7 @@ public class NetBeansMCPHandler {
             try {
                 oldFileContents = Files.readString(oldFile.toPath(), StandardCharsets.UTF_8);
             } catch (IOException e) {
+                LOGGER.log(Level.WARNING, "Failed to read old file for diff: " + oldFilePath, e);
                 return responseBuilder.createToolResponse("Failed to read old file: " + e.getMessage());
             }
             
@@ -1231,12 +1234,15 @@ public class NetBeansMCPHandler {
                         
                         return responseBuilder.createToolResponse(result);
                     } else {
+                        LOGGER.warning("Failed to create diff view - diffView is null");
                         return responseBuilder.createToolResponse("Failed to create diff view");
                     }
                 } catch (IOException e) {
+                    LOGGER.log(Level.WARNING, "Error creating diff view", e);
                     return responseBuilder.createToolResponse("Error creating diff: " + e.getMessage());
                 }
             } else {
+                LOGGER.warning("Diff service not available - no Diff implementation found in Lookup");
                 return responseBuilder.createToolResponse("Diff service not available");
             }
             
