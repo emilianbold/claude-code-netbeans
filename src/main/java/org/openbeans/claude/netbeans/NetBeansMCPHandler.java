@@ -758,7 +758,8 @@ public class NetBeansMCPHandler {
         try {
             // Find the TopComponent by tab name
             for (TopComponent tc : TopComponent.getRegistry().getOpened()) {
-                if (tc.getDisplayName().equals(tabName)) {
+                String displayName = tc.getDisplayName();
+                if (displayName != null && displayName.equals(tabName)) {
                     // Close the tab
                     tc.close();
                     return responseBuilder.createToolResponse("Tab closed successfully: " + tabName);
