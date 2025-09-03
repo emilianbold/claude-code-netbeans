@@ -46,7 +46,7 @@ mvn clean package
 
 The plugin automatically starts when NetBeans launches and:
 
-1. **Creates Lock File**: Writes connection information to `~/.claude/ide/netbeans.lock`
+1. **Creates Lock File**: Writes connection information to `~/.claude/ide/{port}.lock`
 2. **Starts WebSocket Server**: Listens on an available port (8990-9100 range)
 3. **Updates on Changes**: Refreshes workspace information when projects are opened/closed
 
@@ -162,7 +162,7 @@ mvn clean package
 - Ensure all dependencies are available
 
 ### Claude Code Not Connecting
-- Verify lock file exists: `~/.claude/ide/netbeans.lock`
+- Verify lock file exists: `~/.claude/ide/{port}.lock`
 - Check if WebSocket port is accessible
 - Review plugin status: **Tools > Claude Code Status**
 
