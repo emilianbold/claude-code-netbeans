@@ -30,6 +30,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Map;
 import java.util.WeakHashMap;
+import java.util.List;
+import java.util.ArrayList;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.beans.PropertyChangeEvent;
@@ -45,6 +47,8 @@ import java.io.StringReader;
 import java.io.Reader;
 import java.io.Writer;
 import java.io.IOException;
+import org.netbeans.editor.Annotations;
+import org.netbeans.editor.AnnotationDesc;
 
 /**
  * Handles Model Context Protocol messages and provides NetBeans IDE capabilities
@@ -75,6 +79,31 @@ public class NetBeansMCPHandler {
             this.endLine = endLine;
             this.endColumn = endColumn;
             this.isEmpty = selectedText == null || selectedText.isEmpty();
+        }
+    }
+    
+    /**
+     * Data class to hold diagnostic information (errors, warnings) from NetBeans.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public static class DiagnosticData {
+        public final String message;
+        public final String severity; // "error", "warning", "info", "hint"
+        public final String source;
+        public final String filePath;
+        public final int line;
+        public final int column;
+        public final String code; // error/warning code if available
+        
+        public DiagnosticData(String message, String severity, String source, 
+                            String filePath, int line, int column, String code) {
+            this.message = message;
+            this.severity = severity;
+            this.source = source;
+            this.filePath = filePath;
+            this.line = line;
+            this.column = column;
+            this.code = code;
         }
     }
     
@@ -235,7 +264,8 @@ public class NetBeansMCPHandler {
         tools.add(createTool("close_tab", "Close an open editor tab",
             "tab_name", "string", "Name of the tab to close"));
         
-        tools.add(createTool("getDiagnostics", "Get diagnostics information about the IDE and environment"));
+        tools.add(createTool("getDiagnostics", "Get diagnostic information (errors, warnings) for files",
+            "uri", "string", "Optional URI of specific file to get diagnostics for"));
         
         tools.add(createTool("checkDocumentDirty", "Check if a document has unsaved changes",
             "filePath", "string", "Path to the file to check"));
@@ -313,7 +343,8 @@ public class NetBeansMCPHandler {
                     return handleCloseTab(closeTabNameNode.asText());
                     
                 case "getDiagnostics":
-                    return handleGetDiagnostics();
+                    String uri = arguments.has("uri") ? arguments.get("uri").asText() : null;
+                    return handleGetDiagnostics(uri);
                     
                 case "checkDocumentDirty":
                     JsonNode dirtyPathNode = arguments.get("filePath");
@@ -620,7 +651,7 @@ public class NetBeansMCPHandler {
      * 
      * @return SelectionData object with selection information, or null if no selection
      */
-    private SelectionData getCurrentSelectionData() {
+    private static SelectionData getCurrentSelectionData() {
         // Get the current active editor
         TopComponent activeTC = TopComponent.getRegistry().getActivated();
         if (activeTC == null) {
@@ -722,60 +753,185 @@ public class NetBeansMCPHandler {
         }
     }
     
-    private JsonNode handleGetDiagnostics() {
+    private JsonNode handleGetDiagnostics(String uri) {
         try {
-            ObjectNode diagnostics = responseBuilder.objectNode();
-            
-            // NetBeans IDE information
-            diagnostics.put("netbeans_version", System.getProperty("netbeans.buildnumber", "Unknown"));
-            File nbUser = Places.getUserDirectory();
-            diagnostics.put("netbeans_user", nbUser != null ? nbUser.getAbsolutePath() : "Unknown");
-            
-            // Java information
-            diagnostics.put("java_version", System.getProperty("java.version"));
-            diagnostics.put("java_vendor", System.getProperty("java.vendor"));
-            diagnostics.put("java_home", System.getProperty("java.home"));
-            
-            // Operating system information
-            diagnostics.put("os_name", System.getProperty("os.name"));
-            diagnostics.put("os_version", System.getProperty("os.version"));
-            diagnostics.put("os_arch", System.getProperty("os.arch"));
-            
-            // Plugin information
-            diagnostics.put("plugin_version", "1.0.7");
-            diagnostics.put("mcp_protocol_version", "2024-11-05");
-            
-            // Open projects count
-            Project[] openProjects = OpenProjects.getDefault().getOpenProjects();
-            diagnostics.put("open_projects_count", openProjects.length);
-            
-            // Open editors count
-            int openEditorsCount = 0;
-            for (TopComponent tc : TopComponent.getRegistry().getOpened()) {
-                Node[] nodes = tc.getActivatedNodes();
-                if (nodes != null && nodes.length > 0) {
-                    DataObject dataObject = nodes[0].getLookup().lookup(DataObject.class);
-                    if (dataObject != null) {
-                        openEditorsCount++;
-                    }
-                }
+            if (uri != null) {
+                // Get diagnostics for a specific file
+                return getDiagnosticsForFile(uri);
+            } else {
+                // Get diagnostics for all open files
+                return getDiagnosticsForAllFiles();
             }
-            diagnostics.put("open_editors_count", openEditorsCount);
-            
-            // Memory information
-            Runtime runtime = Runtime.getRuntime();
-            diagnostics.put("max_memory_mb", runtime.maxMemory() / (1024 * 1024));
-            diagnostics.put("total_memory_mb", runtime.totalMemory() / (1024 * 1024));
-            diagnostics.put("free_memory_mb", runtime.freeMemory() / (1024 * 1024));
-            diagnostics.put("used_memory_mb", (runtime.totalMemory() - runtime.freeMemory()) / (1024 * 1024));
-            
-            return responseBuilder.createToolResponse(diagnostics);
-            
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Failed to get diagnostics", e);
             return responseBuilder.createToolResponse("Failed to get diagnostics: " + e.getMessage());
         }
     }
+    
+    /**
+     * Extracts diagnostic information from NetBeans annotations for a specific file.
+     */
+    private JsonNode getDiagnosticsForFile(String uri) {
+        try {
+            // Convert URI to file path
+            String filePath = uri.startsWith("file://") ? uri.substring(7) : uri;
+            
+            // Security check: Only allow files within open projects
+            if (!isPathWithinOpenProjects(filePath)) {
+                throw new SecurityException("File access denied: Path is not within any open project directory: " + filePath);
+            }
+            
+            List<DiagnosticData> diagnostics = extractDiagnosticsFromFile(filePath);
+            return responseBuilder.createToolResponse(diagnostics);
+            
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Failed to get diagnostics for file: " + uri, e);
+            return responseBuilder.createToolResponse("Failed to get diagnostics for file: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Gets diagnostics for all currently open files.
+     */
+    private JsonNode getDiagnosticsForAllFiles() {
+        try {
+            List<DiagnosticData> allDiagnostics = new ArrayList<>();
+            
+            // Go through all open TopComponents (editor tabs)
+            for (TopComponent tc : TopComponent.getRegistry().getOpened()) {
+                Node[] nodes = tc.getActivatedNodes();
+                if (nodes != null && nodes.length > 0) {
+                    DataObject dataObject = nodes[0].getLookup().lookup(DataObject.class);
+                    if (dataObject != null) {
+                        FileObject fileObject = dataObject.getPrimaryFile();
+                        if (fileObject != null) {
+                            File file = FileUtil.toFile(fileObject);
+                            if (file != null) {
+                                List<DiagnosticData> fileDiagnostics = extractDiagnosticsFromFile(file.getAbsolutePath());
+                                allDiagnostics.addAll(fileDiagnostics);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            return responseBuilder.createToolResponse(allDiagnostics);
+            
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Failed to get diagnostics for all files", e);
+            return responseBuilder.createToolResponse("Failed to get diagnostics: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Extracts diagnostic information from a specific file using NetBeans editor annotations.
+     */
+    private List<DiagnosticData> extractDiagnosticsFromFile(String filePath) {
+        List<DiagnosticData> diagnostics = new ArrayList<>();
+        
+        try {
+            File file = new File(filePath);
+            FileObject fileObject = FileUtil.toFileObject(file);
+            
+            if (fileObject != null) {
+                DataObject dataObject = DataObject.find(fileObject);
+                if (dataObject != null) {
+                    EditorCookie editorCookie = dataObject.getLookup().lookup(EditorCookie.class);
+                    
+                    if (editorCookie != null) {
+                        Document doc = editorCookie.getDocument();
+                        if (doc != null) {
+                            // Get the annotations for this document
+                            Annotations annotations = (Annotations) doc.getProperty(Annotations.class);
+                            
+                            if (annotations != null) {
+                                // Iterate through lines with annotations using NetBeans API
+                                int currentLine = annotations.getNextLineWithAnnotation(-1); // Start from the beginning
+                                
+                                while (currentLine != -1) {
+                                    // Get the active annotation for this line
+                                    AnnotationDesc activeAnnotation = annotations.getActiveAnnotation(currentLine);
+                                    if (activeAnnotation != null) {
+                                        DiagnosticData diagnostic = convertAnnotationToDiagnostic(
+                                            activeAnnotation, filePath, currentLine + 1, 0);
+                                        if (diagnostic != null) {
+                                            diagnostics.add(diagnostic);
+                                        }
+                                    }
+                                    
+                                    // Get all passive annotations for this line
+                                    AnnotationDesc[] passiveAnnotations = annotations.getPassiveAnnotationsForLine(currentLine);
+                                    if (passiveAnnotations != null) {
+                                        for (AnnotationDesc annotation : passiveAnnotations) {
+                                            DiagnosticData diagnostic = convertAnnotationToDiagnostic(
+                                                annotation, filePath, currentLine + 1, 0);
+                                            if (diagnostic != null) {
+                                                diagnostics.add(diagnostic);
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Move to the next line with annotations
+                                    currentLine = annotations.getNextLineWithAnnotation(currentLine);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.log(Level.FINE, "Could not extract diagnostics from file: " + filePath, e);
+        }
+        
+        return diagnostics;
+    }
+    
+    /**
+     * Converts a NetBeans AnnotationDesc to a DiagnosticData object.
+     */
+    private DiagnosticData convertAnnotationToDiagnostic(AnnotationDesc annotation, String filePath, 
+                                                       int lineNumber, int columnNumber) {
+        if (annotation == null) {
+            return null;
+        }
+        
+        String message = annotation.getShortDescription();
+        if (message == null || message.trim().isEmpty()) {
+            return null;
+        }
+        
+        // Try to determine severity from annotation type
+        String severity = "info"; // default
+        String annotationType = annotation.getAnnotationType();
+        String source = "netbeans";
+        
+        if (annotationType != null) {
+            String lowerType = annotationType.toLowerCase();
+            if (lowerType.contains("error")) {
+                severity = "error";
+                source = "compiler";
+            } else if (lowerType.contains("warning") || lowerType.contains("warn")) {
+                severity = "warning";
+                source = "compiler";
+            } else if (lowerType.contains("hint")) {
+                severity = "hint";
+                source = "editor";
+            }
+        }
+        
+        // Try to extract error code if available
+        String code = null;
+        if (message.contains("[") && message.contains("]")) {
+            int start = message.lastIndexOf("[");
+            int end = message.lastIndexOf("]");
+            if (start < end && start >= 0) {
+                code = message.substring(start + 1, end);
+            }
+        }
+        
+        return new DiagnosticData(message, severity, source, filePath, lineNumber, columnNumber, code);
+    }
+    
     
     /**
      * Checks if a document has unsaved changes.

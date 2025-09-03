@@ -124,6 +124,11 @@
             <artifactId>org-netbeans-modules-diff</artifactId>
             <version>${netbeans.version}</version>
         </dependency>
+        <dependency>
+            <groupId>org.netbeans.api</groupId>
+            <artifactId>org-netbeans-modules-editor-lib</artifactId>
+            <version>${netbeans.version}</version>
+        </dependency>
 
         <!-- Model Context Protocol Java SDK - Remove for now and use manual JSON-RPC -->
         <!--
