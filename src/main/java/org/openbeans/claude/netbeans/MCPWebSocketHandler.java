@@ -20,9 +20,11 @@ public class MCPWebSocketHandler extends WebSocketAdapter {
     private static final Logger LOGGER = Logger.getLogger(MCPWebSocketHandler.class.getName());
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final NetBeansMCPHandler mcpHandler;
+    private final MCPResponseBuilder responseBuilder;
     
     public MCPWebSocketHandler(NetBeansMCPHandler mcpHandler) {
         this.mcpHandler = mcpHandler;
+        this.responseBuilder = new MCPResponseBuilder(objectMapper);
     }
     
     @Override
@@ -43,6 +45,12 @@ public class MCPWebSocketHandler extends WebSocketAdapter {
             // Parse the JSON-RPC message
             JsonNode messageNode = objectMapper.readTree(message);
             
+            // Extract ID if present (for error responses)
+            Integer requestId = null;
+            if (messageNode.has("id") && !messageNode.get("id").isNull()) {
+                requestId = messageNode.get("id").asInt();
+            }
+            
             // Process the MCP message
             String response = mcpHandler.handleMessage(messageNode);
             
@@ -55,15 +63,19 @@ public class MCPWebSocketHandler extends WebSocketAdapter {
         } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Error processing WebSocket message: " + message, e);
             
-            // Send error response
+            // Try to extract requestId from the original message for error response
+            Integer errorRequestId = null;
             try {
-                String errorResponse = createErrorResponse(e.getMessage());
-                if (getSession() != null && getSession().isOpen()) {
-                    getSession().getRemote().sendString(errorResponse);
+                JsonNode messageNode = objectMapper.readTree(message);
+                if (messageNode.has("id") && !messageNode.get("id").isNull()) {
+                    errorRequestId = messageNode.get("id").asInt();
                 }
-            } catch (IOException ioException) {
-                LOGGER.log(Level.SEVERE, "Failed to send error response", ioException);
+            } catch (Exception parseEx) {
+                // Ignore parsing errors, we'll send error without ID
             }
+            
+            // Send error response with proper ID handling
+            sendErrorResponse(errorRequestId, e.getMessage());
         }
     }
     
@@ -84,25 +96,21 @@ public class MCPWebSocketHandler extends WebSocketAdapter {
     }
     
     /**
-     * Creates a JSON-RPC error response.
+     * Sends an error response with proper ID handling.
      * 
+     * @param requestId the request ID (can be null)
      * @param errorMessage the error message
-     * @return JSON error response string
      */
-    private String createErrorResponse(String errorMessage) {
+    private void sendErrorResponse(Integer requestId, String errorMessage) {
         try {
-            return objectMapper.writeValueAsString(
-                objectMapper.createObjectNode()
-                    .put("jsonrpc", "2.0")
-                    .put("id", (String) null)
-                    .set("error", objectMapper.createObjectNode()
-                        .put("code", -32603)
-                        .put("message", "Internal error")
-                        .put("data", errorMessage))
+            String errorResponse = responseBuilder.createErrorResponse(
+                requestId, -32603, "Internal error", errorMessage
             );
+            if (getSession() != null && getSession().isOpen()) {
+                getSession().getRemote().sendString(errorResponse);
+            }
         } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Failed to create error response", e);
-            return "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32603,\"message\":\"Internal error\"}}";
+            LOGGER.log(Level.SEVERE, "Failed to send error response", e);
         }
     }
 }
