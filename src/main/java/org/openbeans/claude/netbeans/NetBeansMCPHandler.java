@@ -203,6 +203,9 @@ public class NetBeansMCPHandler {
         
         tools.add(createTool("checkDocumentDirty", "Check if a document has unsaved changes",
             "filePath", "string", "Path to the file to check"));
+            
+        tools.add(createTool("saveDocument", "Save a document to disk",
+            "filePath", "string", "Path to the file to save"));
         
         ObjectNode result = responseBuilder.objectNode();
         result.set("tools", tools);
@@ -274,6 +277,13 @@ public class NetBeansMCPHandler {
                         throw new IllegalArgumentException("Missing required parameter: filePath");
                     }
                     return handleCheckDocumentDirty(dirtyPathNode.asText());
+                    
+                case "saveDocument":
+                    JsonNode savePathNode = arguments.get("filePath");
+                    if (savePathNode == null) {
+                        throw new IllegalArgumentException("Missing required parameter: filePath");
+                    }
+                    return handleSaveDocument(savePathNode.asText());
                     
                 default:
                     throw new IllegalArgumentException("Unknown tool: " + toolName);
@@ -723,6 +733,55 @@ public class NetBeansMCPHandler {
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Error checking document dirty state: " + filePath, e);
             return responseBuilder.createToolResponse("Error checking document dirty state: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Saves a document to disk.
+     */
+    private JsonNode handleSaveDocument(String filePath) {
+        try {
+            // Security check: Only allow saving files within open project directories
+            if (!isPathWithinOpenProjects(filePath)) {
+                throw new SecurityException("File save denied: Path is not within any open project directory: " + filePath);
+            }
+            
+            File file = new File(filePath);
+            FileObject fileObject = FileUtil.toFileObject(file);
+            
+            if (fileObject != null) {
+                try {
+                    DataObject dataObject = DataObject.find(fileObject);
+                    if (dataObject != null) {
+                        EditorCookie editorCookie = dataObject.getLookup().lookup(EditorCookie.class);
+                        
+                        if (editorCookie != null) {
+                            // Save the document
+                            editorCookie.saveDocument();
+                            
+                            ObjectNode result = responseBuilder.objectNode();
+                            result.put("filePath", filePath);
+                            result.put("saved", true);
+                            result.put("message", "Document saved successfully");
+                            
+                            return responseBuilder.createToolResponse(result);
+                        } else {
+                            return responseBuilder.createToolResponse("File is not editable or not currently managed by an editor");
+                        }
+                    } else {
+                        return responseBuilder.createToolResponse("File is not managed by NetBeans");
+                    }
+                } catch (Exception e) {
+                    LOGGER.log(Level.WARNING, "Error saving document: " + filePath, e);
+                    return responseBuilder.createToolResponse("Error saving document: " + e.getMessage());
+                }
+            } else {
+                return responseBuilder.createToolResponse("File not found: " + filePath);
+            }
+            
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Error in saveDocument: " + filePath, e);
+            return responseBuilder.createToolResponse("Error saving document: " + e.getMessage());
         }
     }
     
