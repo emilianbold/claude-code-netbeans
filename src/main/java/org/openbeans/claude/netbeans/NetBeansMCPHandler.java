@@ -201,6 +201,9 @@ public class NetBeansMCPHandler {
         
         tools.add(createTool("getDiagnostics", "Get diagnostics information about the IDE and environment"));
         
+        tools.add(createTool("checkDocumentDirty", "Check if a document has unsaved changes",
+            "filePath", "string", "Path to the file to check"));
+        
         ObjectNode result = responseBuilder.objectNode();
         result.set("tools", tools);
         return result;
@@ -264,6 +267,13 @@ public class NetBeansMCPHandler {
                     
                 case "getDiagnostics":
                     return handleGetDiagnostics();
+                    
+                case "checkDocumentDirty":
+                    JsonNode dirtyPathNode = arguments.get("filePath");
+                    if (dirtyPathNode == null) {
+                        throw new IllegalArgumentException("Missing required parameter: filePath");
+                    }
+                    return handleCheckDocumentDirty(dirtyPathNode.asText());
                     
                 default:
                     throw new IllegalArgumentException("Unknown tool: " + toolName);
@@ -663,6 +673,56 @@ public class NetBeansMCPHandler {
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Failed to get diagnostics", e);
             return responseBuilder.createToolResponse("Failed to get diagnostics: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Checks if a document has unsaved changes.
+     */
+    private JsonNode handleCheckDocumentDirty(String filePath) {
+        try {
+            // Security check: Only allow checking files within open project directories
+            if (!isPathWithinOpenProjects(filePath)) {
+                throw new SecurityException("File access denied: Path is not within any open project directory: " + filePath);
+            }
+            
+            File file = new File(filePath);
+            FileObject fileObject = FileUtil.toFileObject(file);
+            
+            if (fileObject != null) {
+                try {
+                    DataObject dataObject = DataObject.find(fileObject);
+                    if (dataObject != null) {
+                        boolean isDirty = dataObject.isModified();
+                        
+                        ObjectNode result = responseBuilder.objectNode();
+                        result.put("filePath", filePath);
+                        result.put("isDirty", isDirty);
+                        
+                        // Also check if the file is currently open in an editor
+                        EditorCookie editorCookie = dataObject.getLookup().lookup(EditorCookie.class);
+                        boolean isOpen = editorCookie != null && editorCookie.getOpenedPanes() != null && editorCookie.getOpenedPanes().length > 0;
+                        result.put("isOpen", isOpen);
+                        
+                        return responseBuilder.createToolResponse(result);
+                    }
+                } catch (Exception e) {
+                    LOGGER.log(Level.WARNING, "Error checking DataObject for file: " + filePath, e);
+                }
+            }
+            
+            // File not found or not a NetBeans-managed file
+            ObjectNode result = responseBuilder.objectNode();
+            result.put("filePath", filePath);
+            result.put("isDirty", false);
+            result.put("isOpen", false);
+            result.put("note", "File not found or not currently managed by NetBeans");
+            
+            return responseBuilder.createToolResponse(result);
+            
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Error checking document dirty state: " + filePath, e);
+            return responseBuilder.createToolResponse("Error checking document dirty state: " + e.getMessage());
         }
     }
     
