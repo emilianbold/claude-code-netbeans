@@ -44,12 +44,17 @@ public class NetBeansMCPHandler {
     
     private static final Logger LOGGER = Logger.getLogger(NetBeansMCPHandler.class.getName());
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final MCPResponseBuilder responseBuilder;
     private Session webSocketSession;
     
     // Selection tracking
     private final Map<JTextComponent, CaretListener> selectionListeners = new WeakHashMap<>();
     private PropertyChangeListener topComponentListener;
     private JTextComponent currentTextComponent;
+    
+    public NetBeansMCPHandler() {
+        this.responseBuilder = new MCPResponseBuilder(objectMapper);
+    }
     
     /**
      * Handles incoming MCP messages and routes them to appropriate handlers.
@@ -61,11 +66,11 @@ public class NetBeansMCPHandler {
         try {
             String method = message.get("method").asText();
             JsonNode params = message.get("params");
-            String id = message.has("id") ? message.get("id").asText() : null;
+            Integer id = message.has("id") ? message.get("id").asInt() : null;
             
             LOGGER.log(Level.FINE, "Processing MCP method: {0}", method);
             
-            ObjectNode response = objectMapper.createObjectNode();
+            ObjectNode response = responseBuilder.objectNode();
             response.put("jsonrpc", "2.0");
             if (id != null) {
                 response.put("id", id);
@@ -98,14 +103,14 @@ public class NetBeansMCPHandler {
                     
                 default:
                     LOGGER.log(Level.WARNING, "Unknown MCP method: {0}", method);
-                    return createErrorResponse(id, -32601, "Method not found", method);
+                    return responseBuilder.createErrorResponse(id, -32601, "Method not found", method);
             }
             
             return objectMapper.writeValueAsString(response);
             
         } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Error handling MCP message", e);
-            return createErrorResponse(null, -32603, "Internal error", e.getMessage());
+            return responseBuilder.createErrorResponse(null, -32603, "Internal error", e.getMessage());
         }
     }
     
@@ -113,27 +118,27 @@ public class NetBeansMCPHandler {
      * Handles MCP initialize request.
      */
     private JsonNode handleInitialize(JsonNode params) {
-        ObjectNode result = objectMapper.createObjectNode();
+        ObjectNode result = responseBuilder.objectNode();
         result.put("protocolVersion", "2024-11-05");
         
-        ObjectNode capabilities = objectMapper.createObjectNode();
+        ObjectNode capabilities = responseBuilder.objectNode();
         
-        ObjectNode toolsCapability = objectMapper.createObjectNode();
+        ObjectNode toolsCapability = responseBuilder.objectNode();
         toolsCapability.put("listChanged", true);
         capabilities.set("tools", toolsCapability);
         
-        ObjectNode resourcesCapability = objectMapper.createObjectNode();
+        ObjectNode resourcesCapability = responseBuilder.objectNode();
         resourcesCapability.put("subscribe", true);
         resourcesCapability.put("listChanged", true);
         capabilities.set("resources", resourcesCapability);
         
-        ObjectNode promptsCapability = objectMapper.createObjectNode();
+        ObjectNode promptsCapability = responseBuilder.objectNode();
         promptsCapability.put("listChanged", true);
         capabilities.set("prompts", promptsCapability);
         
         result.set("capabilities", capabilities);
         
-        ObjectNode serverInfo = objectMapper.createObjectNode();
+        ObjectNode serverInfo = responseBuilder.objectNode();
         serverInfo.put("name", "netbeans-mcp-server");
         serverInfo.put("version", "1.0.0");
         result.set("serverInfo", serverInfo);
@@ -145,7 +150,7 @@ public class NetBeansMCPHandler {
      * Lists available tools (executable functions).
      */
     private JsonNode handleToolsList() {
-        ArrayNode tools = objectMapper.createArrayNode();
+        ArrayNode tools = responseBuilder.arrayNode();
         
         // Core Claude Code tools
         tools.add(createTool("openFile", "Opens a file in the editor", 
@@ -174,7 +179,7 @@ public class NetBeansMCPHandler {
         
         tools.add(createTool("getDiagnostics", "Get diagnostics information about the IDE and environment"));
         
-        ObjectNode result = objectMapper.createObjectNode();
+        ObjectNode result = responseBuilder.objectNode();
         result.set("tools", tools);
         return result;
     }
@@ -244,10 +249,7 @@ public class NetBeansMCPHandler {
         } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Error executing tool: " + toolName, e);
             
-            ObjectNode result = objectNode();
-            result.put("isError", true);
-            result.put("content", "Error: " + e.getMessage());
-            return result;
+            return responseBuilder.createToolResponse("Error: " + e.getMessage());
         }
     }
     
@@ -255,11 +257,11 @@ public class NetBeansMCPHandler {
      * Lists available resources.
      */
     private JsonNode handleResourcesList() {
-        ArrayNode resources = objectMapper.createArrayNode();
+        ArrayNode resources = responseBuilder.arrayNode();
         
          Project[] openProjects = OpenProjects.getDefault().getOpenProjects();
          for (Project project : openProjects) {
-             ObjectNode resource = objectMapper.createObjectNode();
+             ObjectNode resource = responseBuilder.objectNode();
              resource.put("uri", "project://" + project.getProjectDirectory().getPath());
              resource.put("name", ProjectUtils.getInformation(project).getDisplayName());
              resource.put("description", "NetBeans project: " + ProjectUtils.getInformation(project).getDisplayName());
@@ -267,7 +269,7 @@ public class NetBeansMCPHandler {
              resources.add(resource);
          }
         
-        ObjectNode result = objectMapper.createObjectNode();
+        ObjectNode result = responseBuilder.objectNode();
         result.set("resources", resources);
         return result;
     }
@@ -290,14 +292,14 @@ public class NetBeansMCPHandler {
      * Lists available prompts.
      */
     private JsonNode handlePromptsList() {
-        ArrayNode prompts = objectMapper.createArrayNode();
+        ArrayNode prompts = responseBuilder.arrayNode();
         
-        ObjectNode codeReviewPrompt = objectMapper.createObjectNode();
+        ObjectNode codeReviewPrompt = responseBuilder.objectNode();
         codeReviewPrompt.put("name", "code_review");
         codeReviewPrompt.put("description", "Review code in NetBeans project");
         prompts.add(codeReviewPrompt);
         
-        ObjectNode result = objectMapper.createObjectNode();
+        ObjectNode result = responseBuilder.objectNode();
         result.set("prompts", prompts);
         return result;
     }
@@ -313,10 +315,7 @@ public class NetBeansMCPHandler {
         Path path = Paths.get(filePath);
         String content = Files.readString(path, StandardCharsets.UTF_8);
         
-        ObjectNode result = objectNode();
-        result.put("content", content);
-        result.put("mimeType", "text/plain");
-        return result;
+        return responseBuilder.createToolResponse(content);
     }
     
     private JsonNode handleWriteFile(String filePath, String content) throws IOException {
@@ -329,9 +328,7 @@ public class NetBeansMCPHandler {
         Files.createDirectories(path.getParent());
         Files.writeString(path, content, StandardCharsets.UTF_8);
         
-        ObjectNode result = objectNode();
-        result.put("content", "File written successfully: " + filePath);
-        return result;
+        return responseBuilder.createToolResponse("File written successfully: " + filePath);
     }
     
     private JsonNode handleListFiles(String dirPath) {
@@ -343,10 +340,10 @@ public class NetBeansMCPHandler {
         File dir = new File(dirPath);
         File[] files = dir.listFiles();
         
-        ArrayNode fileList = objectMapper.createArrayNode();
+        ArrayNode fileList = responseBuilder.arrayNode();
         if (files != null) {
             for (File file : files) {
-                ObjectNode fileInfo = objectMapper.createObjectNode();
+                ObjectNode fileInfo = responseBuilder.objectNode();
                 fileInfo.put("name", file.getName());
                 fileInfo.put("path", file.getAbsolutePath());
                 fileInfo.put("isDirectory", file.isDirectory());
@@ -355,25 +352,21 @@ public class NetBeansMCPHandler {
             }
         }
         
-        ObjectNode result = objectNode();
-        result.set("content", fileList);
-        return result;
+        return responseBuilder.createToolResponse(fileList);
     }
     
     private JsonNode handleGetOpenProjects() {
-        ArrayNode projects = objectMapper.createArrayNode();
+        ArrayNode projects = responseBuilder.arrayNode();
         
          Project[] openProjects = OpenProjects.getDefault().getOpenProjects();
          for (Project project : openProjects) {
-             ObjectNode projectInfo = objectMapper.createObjectNode();
+             ObjectNode projectInfo = responseBuilder.objectNode();
              projectInfo.put("name", ProjectUtils.getInformation(project).getDisplayName());
              projectInfo.put("path", project.getProjectDirectory().getPath());
              projects.add(projectInfo);
          }
         
-        ObjectNode result = objectNode();
-        result.set("content", projects);
-        return result;
+        return responseBuilder.createToolResponse(projects);
     }
     
     private JsonNode handleGetProjectFiles(String projectPath) {
@@ -382,16 +375,14 @@ public class NetBeansMCPHandler {
             throw new IllegalArgumentException("Project not found: " + projectPath);
         }
         
-        ArrayNode files = objectMapper.createArrayNode();
+        ArrayNode files = responseBuilder.arrayNode();
         collectProjectFiles(projectDir, files, "");
         
-        ObjectNode result = objectNode();
-        result.set("content", files);
-        return result;
+        return responseBuilder.createToolResponse(files);
     }
     
     private JsonNode handleGetOpenDocuments() {
-        ArrayNode documents = objectMapper.createArrayNode();
+        ArrayNode documents = responseBuilder.arrayNode();
         
         try {
             // Use TopComponent registry to get open editor nodes
@@ -403,7 +394,7 @@ public class NetBeansMCPHandler {
                     if (dataObject != null) {
                         FileObject fileObject = dataObject.getPrimaryFile();
                         if (fileObject != null) {
-                            ObjectNode docInfo = objectMapper.createObjectNode();
+                            ObjectNode docInfo = responseBuilder.objectNode();
                             docInfo.put("name", fileObject.getName());
                             docInfo.put("path", fileObject.getPath());
                             docInfo.put("extension", fileObject.getExt());
@@ -425,9 +416,7 @@ public class NetBeansMCPHandler {
             LOGGER.log(Level.WARNING, "Error getting open documents", e);
         }
         
-        ObjectNode result = objectNode();
-        result.set("content", documents);
-        return result;
+        return responseBuilder.createToolResponse(documents);
     }
     
     private JsonNode handleGetDocumentContent(String filePath) {
@@ -441,9 +430,7 @@ public class NetBeansMCPHandler {
                     Document doc = editorCookie.getDocument();
                     if (doc != null) {
                         String content = doc.getText(0, doc.getLength());
-                        ObjectNode result = objectNode();
-                        result.put("content", content);
-                        return result;
+                        return responseBuilder.createToolResponse(content);
                     }
                 }
             }
@@ -479,10 +466,7 @@ public class NetBeansMCPHandler {
                     // Open the file in NetBeans editor
                     editorCookie.open();
                     
-                    ObjectNode result = objectNode();
-                    result.put("content", "File opened successfully: " + filePath);
-                    result.put("preview", preview);
-                    return result;
+                    return responseBuilder.createToolResponse("File opened successfully: " + filePath);
                 }
             }
             
@@ -494,19 +478,17 @@ public class NetBeansMCPHandler {
     }
     
     private JsonNode handleGetWorkspaceFolders() {
-        ArrayNode folders = objectMapper.createArrayNode();
+        ArrayNode folders = responseBuilder.arrayNode();
         
         Project[] openProjects = OpenProjects.getDefault().getOpenProjects();
         for (Project project : openProjects) {
-            ObjectNode folderInfo = objectMapper.createObjectNode();
+            ObjectNode folderInfo = responseBuilder.objectNode();
             folderInfo.put("name", ProjectUtils.getInformation(project).getDisplayName());
             folderInfo.put("uri", "file://" + project.getProjectDirectory().getPath());
             folders.add(folderInfo);
         }
         
-        ObjectNode result = objectNode();
-        result.set("content", folders);
-        return result;
+        return responseBuilder.createToolResponse(folders);
     }
     
     private JsonNode handleGetOpenEditors() {
@@ -534,10 +516,9 @@ public class NetBeansMCPHandler {
                                 int selectionStart = textComponent.getSelectionStart();
                                 int selectionEnd = textComponent.getSelectionEnd();
                                 
-                                ObjectNode result = objectNode();
-                                
                                 if (selectedText != null && !selectedText.isEmpty()) {
-                                    result.put("content", selectedText);
+                                    ObjectNode selectionInfo = responseBuilder.objectNode();
+                                    selectionInfo.put("text", selectedText);
                                     
                                     // Use NbDocument utility methods for line/column calculation
                                     int startLine = NbDocument.findLineNumber(doc, selectionStart) + 1; // Convert to 1-based
@@ -545,44 +526,35 @@ public class NetBeansMCPHandler {
                                     int endLine = NbDocument.findLineNumber(doc, selectionEnd) + 1; // Convert to 1-based
                                     int endColumn = NbDocument.findLineColumn(doc, selectionEnd);
                                     
-                                    result.put("startLine", startLine);
-                                    result.put("startColumn", startColumn);
-                                    result.put("endLine", endLine);
-                                    result.put("endColumn", endColumn);
+                                    selectionInfo.put("startLine", startLine);
+                                    selectionInfo.put("startColumn", startColumn);
+                                    selectionInfo.put("endLine", endLine);
+                                    selectionInfo.put("endColumn", endColumn);
                                     
                                     // Add file path if available
                                     DataObject dataObject = nodes[0].getLookup().lookup(DataObject.class);
                                     if (dataObject != null) {
                                         FileObject fileObject = dataObject.getPrimaryFile();
                                         if (fileObject != null) {
-                                            result.put("filePath", fileObject.getPath());
+                                            selectionInfo.put("filePath", fileObject.getPath());
                                         }
                                     }
+                                    return responseBuilder.createToolResponse(selectionInfo);
                                 } else {
                                     // No selection
-                                    result.put("content", "");
-                                    result.put("startLine", 0);
-                                    result.put("startColumn", 0);
-                                    result.put("endLine", 0);
-                                    result.put("endColumn", 0);
+                                    return responseBuilder.createToolResponse("");
                                 }
-                                
-                                return result;
                             }
                         }
                     }
                 }
             }
             
-            ObjectNode result = objectNode();
-            result.put("content", "");
-            return result;
+            return responseBuilder.createToolResponse("");
             
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Error getting current selection", e);
-            ObjectNode result = objectNode();
-            result.put("content", "");
-            return result;
+            return responseBuilder.createToolResponse("");
         }
     }
     
@@ -601,17 +573,13 @@ public class NetBeansMCPHandler {
                             // Close the tab
                             tc.close();
                             
-                            ObjectNode result = objectNode();
-                            result.put("content", "Tab closed successfully: " + filePath);
-                            return result;
+                            return responseBuilder.createToolResponse("Tab closed successfully: " + filePath);
                         }
                     }
                 }
                 
                 // If tab not found in open tabs, still return success
-                ObjectNode result = objectNode();
-                result.put("content", "Tab not currently open: " + filePath);
-                return result;
+                return responseBuilder.createToolResponse("Tab not currently open: " + filePath);
             }
             
             throw new IllegalArgumentException("File not found: " + filePath);
@@ -623,8 +591,7 @@ public class NetBeansMCPHandler {
     
     private JsonNode handleGetDiagnostics() {
         try {
-            ObjectNode result = objectNode();
-            ObjectNode diagnostics = objectNode();
+            ObjectNode diagnostics = responseBuilder.objectNode();
             
             // NetBeans IDE information
             diagnostics.put("netbeans_version", System.getProperty("netbeans.buildnumber", "Unknown"));
@@ -669,15 +636,11 @@ public class NetBeansMCPHandler {
             diagnostics.put("free_memory_mb", runtime.freeMemory() / (1024 * 1024));
             diagnostics.put("used_memory_mb", (runtime.totalMemory() - runtime.freeMemory()) / (1024 * 1024));
             
-            result.set("content", diagnostics);
-            return result;
+            return responseBuilder.createToolResponse(diagnostics);
             
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Failed to get diagnostics", e);
-            ObjectNode result = objectNode();
-            result.put("isError", true);
-            result.put("content", "Failed to get diagnostics: " + e.getMessage());
-            return result;
+            return responseBuilder.createToolResponse("Failed to get diagnostics: " + e.getMessage());
         }
     }
     
@@ -687,7 +650,7 @@ public class NetBeansMCPHandler {
         for (FileObject child : dir.getChildren()) {
             String childPath = relativePath.isEmpty() ? child.getName() : relativePath + "/" + child.getName();
             
-            ObjectNode fileInfo = objectMapper.createObjectNode();
+            ObjectNode fileInfo = responseBuilder.objectNode();
             fileInfo.put("name", child.getName());
             fileInfo.put("path", childPath);
             fileInfo.put("isFolder", child.isFolder());
@@ -705,11 +668,11 @@ public class NetBeansMCPHandler {
             throw new IllegalArgumentException("Project not found: " + projectPath);
         }
         
-        ObjectNode projectInfo = objectMapper.createObjectNode();
+        ObjectNode projectInfo = responseBuilder.objectNode();
         projectInfo.put("path", projectPath);
         projectInfo.put("name", projectDir.getName());
         
-        ArrayNode files = objectMapper.createArrayNode();
+        ArrayNode files = responseBuilder.arrayNode();
         collectProjectFiles(projectDir, files, "");
         projectInfo.set("files", files);
         
@@ -717,21 +680,21 @@ public class NetBeansMCPHandler {
     }
     
     private ObjectNode createTool(String name, String description, String... params) {
-        ObjectNode tool = objectMapper.createObjectNode();
+        ObjectNode tool = responseBuilder.objectNode();
         tool.put("name", name);
         tool.put("description", description);
         
-        ObjectNode inputSchema = objectMapper.createObjectNode();
+        ObjectNode inputSchema = responseBuilder.objectNode();
         inputSchema.put("type", "object");
-        ObjectNode properties = objectMapper.createObjectNode();
-        ArrayNode required = objectMapper.createArrayNode();
+        ObjectNode properties = responseBuilder.objectNode();
+        ArrayNode required = responseBuilder.arrayNode();
         
         for (int i = 0; i < params.length; i += 3) {
             String paramName = params[i];
             String paramType = params[i + 1];
             String paramDesc = i + 2 < params.length ? params[i + 2] : "";
             
-            ObjectNode param = objectMapper.createObjectNode();
+            ObjectNode param = responseBuilder.objectNode();
             param.put("type", paramType);
             param.put("description", paramDesc);
             properties.set(paramName, param);
@@ -746,31 +709,9 @@ public class NetBeansMCPHandler {
     }
     
     private ObjectNode objectNode() {
-        return objectMapper.createObjectNode();
+        return responseBuilder.objectNode();
     }
     
-    private String createErrorResponse(String id, int code, String message, String data) {
-        try {
-            ObjectNode response = objectMapper.createObjectNode();
-            response.put("jsonrpc", "2.0");
-            if (id != null) {
-                response.put("id", id);
-            }
-            
-            ObjectNode error = objectMapper.createObjectNode();
-            error.put("code", code);
-            error.put("message", message);
-            if (data != null) {
-                error.put("data", data);
-            }
-            response.set("error", error);
-            
-            return objectMapper.writeValueAsString(response);
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Failed to create error response", e);
-            return "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":\"Internal error\"}}";
-        }
-    }
     
     public void setWebSocketSession(Session session) {
         this.webSocketSession = session;
@@ -952,11 +893,7 @@ public class NetBeansMCPHandler {
                     int endColumn = NbDocument.findLineColumn(styledDoc, selectionEnd);
                     
                     // Create selection_changed notification
-                    ObjectNode notification = objectMapper.createObjectNode();
-                    notification.put("jsonrpc", "2.0");
-                    notification.put("method", "selection_changed");
-                    
-                    ObjectNode params = objectMapper.createObjectNode();
+                    ObjectNode params = responseBuilder.objectNode();
                     
                     // Add text (selected text or empty string)
                     params.put("text", selectedText != null ? selectedText : "");
@@ -966,14 +903,14 @@ public class NetBeansMCPHandler {
                     params.put("fileUrl", fileUrl);
                     
                     // Add selection object
-                    ObjectNode selection = objectMapper.createObjectNode();
+                    ObjectNode selection = responseBuilder.objectNode();
                     
-                    ObjectNode start = objectMapper.createObjectNode();
+                    ObjectNode start = responseBuilder.objectNode();
                     start.put("line", startLine);
                     start.put("character", startColumn);
                     selection.set("start", start);
                     
-                    ObjectNode end = objectMapper.createObjectNode();
+                    ObjectNode end = responseBuilder.objectNode();
                     end.put("line", endLine);
                     end.put("character", endColumn);
                     selection.set("end", end);
@@ -982,9 +919,9 @@ public class NetBeansMCPHandler {
                     selection.put("isEmpty", selectedText == null || selectedText.isEmpty());
                     
                     params.set("selection", selection);
-                    notification.set("params", params);
                     
-                    // Send the notification
+                    // Create and send the notification
+                    ObjectNode notification = responseBuilder.createNotification("selection_changed", params);
                     String message = objectMapper.writeValueAsString(notification);
                     webSocketSession.getRemote().sendString(message);
                     

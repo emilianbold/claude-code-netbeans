@@ -1,0 +1,30 @@
+# Maven build directory
+target/
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# NetBeans private files
+nbproject/private/
+build/
+nbbuild/
+dist/
+nbdist/
+.nb-gradle/
+
+# Log files
+*.log
+
+# Temporary files
+*.tmp
+*.swp
+*~

@@ -1,0 +1,205 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "JSON-RPC 2.0 MCP Protocol Messages",
+  "type": "object",
+  "required": ["jsonrpc"],
+  "properties": {
+    "jsonrpc": {
+      "type": "string",
+      "const": "2.0"
+    }
+  },
+  "oneOf": [
+    {
+      "title": "Request Message",
+      "required": ["method", "id"],
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": ["initialize", "tools/list", "tools/call"]
+        },
+        "id": {
+          "type": "integer"
+        },
+        "params": {
+          "oneOf": [
+            {
+              "title": "Initialize Params",
+              "type": "object",
+              "properties": {
+                "protocolVersion": {"type": "string"},
+                "capabilities": {
+                  "type": "object",
+                  "properties": {
+                    "roots": {"type": "object"}
+                  }
+                },
+                "clientInfo": {
+                  "type": "object",
+                  "properties": {
+                    "name": {"type": "string"},
+                    "version": {"type": "string"}
+                  }
+                }
+              }
+            },
+            {
+              "title": "Tools/Call Params",
+              "type": "object",
+              "properties": {
+                "name": {"type": "string"},
+                "arguments": {"type": "object"}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "title": "Response Message",
+      "required": ["id"],
+      "not": {"required": ["method"]},
+      "properties": {
+        "id": {
+          "type": "integer"
+        }
+      },
+      "oneOf": [
+        {
+          "title": "Success Response",
+          "required": ["result"],
+          "properties": {
+            "result": {
+              "oneOf": [
+                {
+                  "title": "Initialize Result",
+                  "type": "object",
+                  "properties": {
+                    "protocolVersion": {"type": "string"},
+                    "capabilities": {
+                      "type": "object",
+                      "properties": {
+                        "tools": {
+                          "type": "object",
+                          "properties": {
+                            "listChanged": {"type": "boolean"}
+                          }
+                        }
+                      }
+                    },
+                    "serverInfo": {
+                      "type": "object",
+                      "properties": {
+                        "name": {"type": "string"},
+                        "version": {"type": "string"}
+                      }
+                    }
+                  }
+                },
+                {
+                  "title": "Tools/Call Result",
+                  "type": "object",
+                  "properties": {
+                    "content": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "type": {"type": "string"},
+                          "text": {"type": "string"}
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "title": "Error Response",
+          "required": ["error"],
+          "properties": {
+            "error": {
+              "type": "object",
+              "properties": {
+                "code": {"type": "integer"},
+                "message": {"type": "string"},
+                "data": {}
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "title": "Notification Message",
+      "required": ["method"],
+      "not": {"required": ["id"]},
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": ["notifications/initialized", "ide_connected", "selection_changed", "diagnostics_changed", "log_event"]
+        },
+        "params": {
+          "oneOf": [
+            {
+              "title": "IDE Connected Params",
+              "type": "object",
+              "properties": {
+                "pid": {"type": "integer"}
+              }
+            },
+            {
+              "title": "Selection Changed Params",
+              "type": "object",
+              "properties": {
+                "text": {"type": "string"},
+                "filePath": {"type": "string"},
+                "fileUrl": {"type": "string"},
+                "selection": {
+                  "type": "object",
+                  "properties": {
+                    "start": {
+                      "type": "object",
+                      "properties": {
+                        "line": {"type": "integer"},
+                        "character": {"type": "integer"}
+                      }
+                    },
+                    "end": {
+                      "type": "object",
+                      "properties": {
+                        "line": {"type": "integer"},
+                        "character": {"type": "integer"}
+                      }
+                    },
+                    "isEmpty": {"type": "boolean"}
+                  }
+                }
+              }
+            },
+            {
+              "title": "Diagnostics Changed Params",
+              "type": "object",
+              "properties": {
+                "uris": {
+                  "type": "array",
+                  "items": {"type": "string"}
+                }
+              }
+            },
+            {
+              "title": "Log Event Params",
+              "type": "object",
+              "properties": {
+                "eventName": {"type": "string"},
+                "eventData": {"type": "object"}
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
