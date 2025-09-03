@@ -79,7 +79,11 @@ public class NetBeansMCPHandler {
             switch (method) {
                 case "initialize":
                     response.set("result", handleInitialize(params));
-                    break;
+                    // Send the response first
+                    String initResponse = objectMapper.writeValueAsString(response);
+                    // Then send notifications/initialized notification
+                    sendInitializedNotification();
+                    return initResponse;
                     
                 case "tools/list":
                     response.set("result", handleToolsList());
@@ -144,6 +148,24 @@ public class NetBeansMCPHandler {
         result.set("serverInfo", serverInfo);
         
         return result;
+    }
+    
+    /**
+     * Sends the notifications/initialized notification after successful initialization.
+     */
+    private void sendInitializedNotification() {
+        try {
+            if (webSocketSession != null && webSocketSession.isOpen()) {
+                ObjectNode notification = responseBuilder.createNotification(
+                    "notifications/initialized", null
+                );
+                String message = objectMapper.writeValueAsString(notification);
+                webSocketSession.getRemote().sendString(message);
+                LOGGER.log(Level.FINE, "Sent notifications/initialized notification");
+            }
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Failed to send initialized notification", e);
+        }
     }
     
     /**
