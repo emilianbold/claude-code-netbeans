@@ -206,7 +206,7 @@ public class NetBeansMCPHandler {
             "path", "string", "Directory path to list (must be within an open project)"));
         
         tools.add(createTool("close_tab", "Close an open editor tab",
-            "path", "string", "Path to the file to close"));
+            "tab_name", "string", "Name of the tab to close"));
         
         tools.add(createTool("getDiagnostics", "Get diagnostics information about the IDE and environment"));
         
@@ -279,11 +279,11 @@ public class NetBeansMCPHandler {
                     return handleListFiles(listPathNode.asText());
                     
                 case "close_tab":
-                    JsonNode closePathNode = arguments.get("path");
-                    if (closePathNode == null) {
-                        throw new IllegalArgumentException("Missing required parameter: path");
+                    JsonNode closeTabNameNode = arguments.get("tab_name");
+                    if (closeTabNameNode == null) {
+                        throw new IllegalArgumentException("Missing required parameter: tab_name");
                     }
-                    return handleCloseTab(closePathNode.asText());
+                    return handleCloseTab(closeTabNameNode.asText());
                     
                 case "getDiagnostics":
                     return handleGetDiagnostics();
@@ -637,31 +637,34 @@ public class NetBeansMCPHandler {
         }
     }
     
-    private JsonNode handleCloseTab(String filePath) {
+    private JsonNode handleCloseTab(String tabName) {
         try {
-            File file = new File(filePath);
-            FileObject fileObject = FileUtil.toFileObject(file);
+            // Find the TopComponent by tab name
+            for (TopComponent tc : TopComponent.getRegistry().getOpened()) {
+                if (tc.getDisplayName().equals(tabName)) {
+                    // Close the tab
+                    tc.close();
+                    return responseBuilder.createToolResponse("Tab closed successfully: " + tabName);
+                }
+            }
             
-            if (fileObject != null) {
-                // Find the TopComponent for this file
-                for (TopComponent tc : TopComponent.getRegistry().getOpened()) {
-                    Node[] nodes = tc.getActivatedNodes();
-                    if (nodes != null && nodes.length > 0) {
-                        DataObject dataObject = nodes[0].getLookup().lookup(DataObject.class);
-                        if (dataObject != null && dataObject.getPrimaryFile().equals(fileObject)) {
-                            // Close the tab
+            // If no exact match found, try to find by file name (without path)
+            for (TopComponent tc : TopComponent.getRegistry().getOpened()) {
+                Node[] nodes = tc.getActivatedNodes();
+                if (nodes != null && nodes.length > 0) {
+                    DataObject dataObject = nodes[0].getLookup().lookup(DataObject.class);
+                    if (dataObject != null) {
+                        String fileName = dataObject.getPrimaryFile().getName();
+                        if (fileName.equals(tabName) || (fileName + "." + dataObject.getPrimaryFile().getExt()).equals(tabName)) {
                             tc.close();
-                            
-                            return responseBuilder.createToolResponse("Tab closed successfully: " + filePath);
+                            return responseBuilder.createToolResponse("Tab closed successfully: " + tabName);
                         }
                     }
                 }
-                
-                // If tab not found in open tabs, still return success
-                return responseBuilder.createToolResponse("Tab not currently open: " + filePath);
             }
             
-            throw new IllegalArgumentException("File not found: " + filePath);
+            // If tab not found in open tabs
+            return responseBuilder.createToolResponse("Tab not currently open: " + tabName);
             
         } catch (Exception e) {
             throw new RuntimeException("Failed to close tab: " + e.getMessage(), e);
