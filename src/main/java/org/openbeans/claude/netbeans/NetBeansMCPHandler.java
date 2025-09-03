@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import org.eclipse.jetty.websocket.api.Session;
 import org.netbeans.api.project.Project;
 import org.netbeans.api.project.ProjectUtils;
@@ -50,6 +51,32 @@ import java.io.IOException;
  * to Claude Code through MCP primitives (Tools, Resources, Prompts).
  */
 public class NetBeansMCPHandler {
+    
+    /**
+     * Data class to hold current text selection information from NetBeans.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public static class SelectionData {
+        public final String text;
+        public final String filePath;
+        public final int startLine;
+        public final int startColumn;
+        public final int endLine;
+        public final int endColumn;
+        public final boolean isEmpty;
+        
+        public SelectionData(String selectedText, String filePath, 
+                           int startLine, int startColumn, 
+                           int endLine, int endColumn) {
+            this.text = selectedText != null ? selectedText : "";
+            this.filePath = filePath;
+            this.startLine = startLine;
+            this.startColumn = startColumn;
+            this.endLine = endLine;
+            this.endColumn = endColumn;
+            this.isEmpty = selectedText == null || selectedText.isEmpty();
+        }
+    }
     
     private static final Logger LOGGER = Logger.getLogger(NetBeansMCPHandler.class.getName());
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -576,65 +603,89 @@ public class NetBeansMCPHandler {
     
     private JsonNode handleGetCurrentSelection() {
         try {
-            // Get the current active editor
-            TopComponent activeTC = TopComponent.getRegistry().getActivated();
-            if (activeTC != null) {
-                Node[] nodes = activeTC.getActivatedNodes();
-                if (nodes != null && nodes.length > 0) {
-                    EditorCookie editorCookie = nodes[0].getLookup().lookup(EditorCookie.class);
-                    if (editorCookie != null) {
-                        // Get the opened editor panes
-                        JTextComponent[] panes = editorCookie.getOpenedPanes();
-                        if (panes != null && panes.length > 0) {
-                            // Use the first pane (usually the active one)
-                            JTextComponent textComponent = panes[0];
-                            
-                            if (textComponent != null && textComponent.getDocument() instanceof StyledDocument) {
-                                StyledDocument doc = (StyledDocument) textComponent.getDocument();
-                                String selectedText = textComponent.getSelectedText();
-                                int selectionStart = textComponent.getSelectionStart();
-                                int selectionEnd = textComponent.getSelectionEnd();
-                                
-                                if (selectedText != null && !selectedText.isEmpty()) {
-                                    ObjectNode selectionInfo = responseBuilder.objectNode();
-                                    selectionInfo.put("text", selectedText);
-                                    
-                                    // Use NbDocument utility methods for line/column calculation
-                                    int startLine = NbDocument.findLineNumber(doc, selectionStart) + 1; // Convert to 1-based
-                                    int startColumn = NbDocument.findLineColumn(doc, selectionStart);
-                                    int endLine = NbDocument.findLineNumber(doc, selectionEnd) + 1; // Convert to 1-based
-                                    int endColumn = NbDocument.findLineColumn(doc, selectionEnd);
-                                    
-                                    selectionInfo.put("startLine", startLine);
-                                    selectionInfo.put("startColumn", startColumn);
-                                    selectionInfo.put("endLine", endLine);
-                                    selectionInfo.put("endColumn", endColumn);
-                                    
-                                    // Add file path if available
-                                    DataObject dataObject = nodes[0].getLookup().lookup(DataObject.class);
-                                    if (dataObject != null) {
-                                        FileObject fileObject = dataObject.getPrimaryFile();
-                                        if (fileObject != null) {
-                                            selectionInfo.put("filePath", fileObject.getPath());
-                                        }
-                                    }
-                                    return responseBuilder.createToolResponse(selectionInfo);
-                                } else {
-                                    // No selection
-                                    return responseBuilder.createToolResponse("");
-                                }
-                            }
-                        }
-                    }
-                }
+            SelectionData selectionData = getCurrentSelectionData();
+            if (selectionData != null) {
+                return buildSelectionResponse(selectionData);
+            } else {
+                return responseBuilder.createToolResponse("");
             }
-            
-            return responseBuilder.createToolResponse("");
-            
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Error getting current selection", e);
             return responseBuilder.createToolResponse("");
         }
+    }
+    
+    /**
+     * Extracts current text selection data from NetBeans IDE.
+     * 
+     * @return SelectionData object with selection information, or null if no selection
+     */
+    private SelectionData getCurrentSelectionData() {
+        // Get the current active editor
+        TopComponent activeTC = TopComponent.getRegistry().getActivated();
+        if (activeTC == null) {
+            return null;
+        }
+        
+        Node[] nodes = activeTC.getActivatedNodes();
+        if (nodes == null || nodes.length == 0) {
+            return null;
+        }
+        
+        EditorCookie editorCookie = nodes[0].getLookup().lookup(EditorCookie.class);
+        if (editorCookie == null) {
+            return null;
+        }
+        
+        // Get the opened editor panes
+        JTextComponent[] panes = editorCookie.getOpenedPanes();
+        if (panes == null || panes.length == 0) {
+            return null;
+        }
+        
+        // Use the first pane (usually the active one)
+        JTextComponent textComponent = panes[0];
+        if (textComponent == null || !(textComponent.getDocument() instanceof StyledDocument)) {
+            return null;
+        }
+        
+        StyledDocument doc = (StyledDocument) textComponent.getDocument();
+        String selectedText = textComponent.getSelectedText();
+        int selectionStart = textComponent.getSelectionStart();
+        int selectionEnd = textComponent.getSelectionEnd();
+        
+        // Get file path
+        String filePath = null;
+        DataObject dataObject = nodes[0].getLookup().lookup(DataObject.class);
+        if (dataObject != null) {
+            FileObject fileObject = dataObject.getPrimaryFile();
+            if (fileObject != null) {
+                filePath = fileObject.getPath();
+            }
+        }
+        
+        // Use NbDocument utility methods for line/column calculation
+        int startLine = NbDocument.findLineNumber(doc, selectionStart) + 1; // Convert to 1-based
+        int startColumn = NbDocument.findLineColumn(doc, selectionStart);
+        int endLine = NbDocument.findLineNumber(doc, selectionEnd) + 1; // Convert to 1-based
+        int endColumn = NbDocument.findLineColumn(doc, selectionEnd);
+        
+        return new SelectionData(selectedText, filePath, startLine, startColumn, endLine, endColumn);
+    }
+    
+    /**
+     * Builds JSON response for selection data.
+     * 
+     * @param selectionData the selection data to convert to JSON response
+     * @return JSON response for the selection
+     */
+    private JsonNode buildSelectionResponse(SelectionData selectionData) {
+        if (selectionData.isEmpty) {
+            return responseBuilder.createToolResponse("");
+        }
+        
+        // Let Jackson automatically serialize the SelectionData object
+        return responseBuilder.createToolResponse(selectionData);
     }
     
     private JsonNode handleCloseTab(String tabName) {
