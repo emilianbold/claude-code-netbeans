@@ -391,20 +391,52 @@ public class NetBeansMCPHandler {
     }
     
     /**
+     * Data class to hold project information.
+     */
+    private static class ProjectData {
+        final String path;
+        final String displayName;
+        
+        ProjectData(String path, String displayName) {
+            this.path = path;
+            this.displayName = displayName;
+        }
+    }
+    
+    /**
+     * Retrieves project data from NetBeans Platform.
+     */
+    private List<ProjectData> getOpenProjectsData() {
+        List<ProjectData> projectDataList = new ArrayList<>();
+        Project[] openProjects = OpenProjects.getDefault().getOpenProjects();
+        
+        for (Project project : openProjects) {
+            String path = project.getProjectDirectory().getPath();
+            String displayName = ProjectUtils.getInformation(project).getDisplayName();
+            projectDataList.add(new ProjectData(path, displayName));
+        }
+        
+        return projectDataList;
+    }
+    
+    /**
      * Lists available resources.
      */
     private JsonNode handleResourcesList() {
         ArrayNode resources = responseBuilder.arrayNode();
         
-         Project[] openProjects = OpenProjects.getDefault().getOpenProjects();
-         for (Project project : openProjects) {
-             ObjectNode resource = responseBuilder.objectNode();
-             resource.put("uri", "project://" + project.getProjectDirectory().getPath());
-             resource.put("name", ProjectUtils.getInformation(project).getDisplayName());
-             resource.put("description", "NetBeans project: " + ProjectUtils.getInformation(project).getDisplayName());
-             resource.put("mimeType", "application/json");
-             resources.add(resource);
-         }
+        // Get project data from NetBeans
+        List<ProjectData> projectDataList = getOpenProjectsData();
+        
+        // Build MCP response from the data
+        for (ProjectData projectData : projectDataList) {
+            ObjectNode resource = responseBuilder.objectNode();
+            resource.put("uri", "project://" + projectData.path);
+            resource.put("name", projectData.displayName);
+            resource.put("description", "NetBeans project: " + projectData.displayName);
+            resource.put("mimeType", "application/json");
+            resources.add(resource);
+        }
         
         ObjectNode result = responseBuilder.objectNode();
         result.set("resources", resources);
@@ -495,13 +527,16 @@ public class NetBeansMCPHandler {
     private JsonNode handleGetOpenProjects() {
         ArrayNode projects = responseBuilder.arrayNode();
         
-         Project[] openProjects = OpenProjects.getDefault().getOpenProjects();
-         for (Project project : openProjects) {
-             ObjectNode projectInfo = responseBuilder.objectNode();
-             projectInfo.put("name", ProjectUtils.getInformation(project).getDisplayName());
-             projectInfo.put("path", project.getProjectDirectory().getPath());
-             projects.add(projectInfo);
-         }
+        // Get project data from NetBeans
+        List<ProjectData> projectDataList = getOpenProjectsData();
+        
+        // Build MCP response from the data
+        for (ProjectData projectData : projectDataList) {
+            ObjectNode projectInfo = responseBuilder.objectNode();
+            projectInfo.put("name", projectData.displayName);
+            projectInfo.put("path", projectData.path);
+            projects.add(projectInfo);
+        }
         
         return responseBuilder.createToolResponse(projects);
     }
