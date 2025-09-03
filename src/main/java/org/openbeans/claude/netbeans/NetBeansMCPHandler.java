@@ -206,6 +206,8 @@ public class NetBeansMCPHandler {
             
         tools.add(createTool("saveDocument", "Save a document to disk",
             "filePath", "string", "Path to the file to save"));
+            
+        tools.add(createTool("closeAllDiffTabs", "Close all diff viewer tabs"));
         
         ObjectNode result = responseBuilder.objectNode();
         result.set("tools", tools);
@@ -284,6 +286,9 @@ public class NetBeansMCPHandler {
                         throw new IllegalArgumentException("Missing required parameter: filePath");
                     }
                     return handleSaveDocument(savePathNode.asText());
+                    
+                case "closeAllDiffTabs":
+                    return handleCloseAllDiffTabs();
                     
                 default:
                     throw new IllegalArgumentException("Unknown tool: " + toolName);
@@ -782,6 +787,57 @@ public class NetBeansMCPHandler {
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Error in saveDocument: " + filePath, e);
             return responseBuilder.createToolResponse("Error saving document: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Closes all diff viewer tabs.
+     */
+    private JsonNode handleCloseAllDiffTabs() {
+        try {
+            int closedCount = 0;
+            
+            // Get all open TopComponents and look for diff viewers
+            for (TopComponent tc : TopComponent.getRegistry().getOpened()) {
+                String displayName = tc.getDisplayName();
+                String name = tc.getName();
+                
+                // Look for components that might be diff viewers
+                // NetBeans diff viewers typically have names containing "diff" or similar patterns
+                if (displayName != null && (displayName.toLowerCase().contains("diff") || 
+                    displayName.contains(" vs ") || displayName.contains(" - "))) {
+                    try {
+                        tc.close();
+                        closedCount++;
+                        LOGGER.log(Level.FINE, "Closed diff tab: {0}", displayName);
+                    } catch (Exception e) {
+                        LOGGER.log(Level.WARNING, "Failed to close diff tab: " + displayName, e);
+                    }
+                }
+                
+                // Also check by class name for known diff viewer classes
+                String className = tc.getClass().getSimpleName();
+                if (className.toLowerCase().contains("diff") || 
+                    className.toLowerCase().contains("compare")) {
+                    try {
+                        tc.close();
+                        closedCount++;
+                        LOGGER.log(Level.FINE, "Closed diff component: {0}", className);
+                    } catch (Exception e) {
+                        LOGGER.log(Level.WARNING, "Failed to close diff component: " + className, e);
+                    }
+                }
+            }
+            
+            ObjectNode result = responseBuilder.objectNode();
+            result.put("closedCount", closedCount);
+            result.put("message", "Closed " + closedCount + " diff viewer tabs");
+            
+            return responseBuilder.createToolResponse(result);
+            
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Error closing diff tabs", e);
+            return responseBuilder.createToolResponse("Error closing diff tabs: " + e.getMessage());
         }
     }
     
