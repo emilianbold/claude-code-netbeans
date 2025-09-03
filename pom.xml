@@ -12,6 +12,14 @@
     <name>Claude Code NetBeans Plugin</name>
     <description>NetBeans integration for Claude Code via Model Context Protocol</description>
 
+    <licenses>
+        <license>
+            <name>ISC License</name>
+            <url>https://opensource.org/licenses/ISC</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
     <properties>
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
@@ -163,6 +171,7 @@
                 <configuration>
                     <brandingToken>${brandingToken}</brandingToken>
                     <cluster>claude</cluster>
+                    <licenseFile>LICENSE</licenseFile>
                     <moduleDependencies>
                         <dependency>
                             <id>org.netbeans.api:org-openide-modules</id>
