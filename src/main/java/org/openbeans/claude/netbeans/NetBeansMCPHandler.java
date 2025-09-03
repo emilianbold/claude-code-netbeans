@@ -35,6 +35,15 @@ import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import org.netbeans.api.project.ui.OpenProjects;
 import org.openide.modules.Places;
+import org.netbeans.api.diff.Diff;
+import org.netbeans.api.diff.DiffView;
+import org.netbeans.api.diff.StreamSource;
+import org.netbeans.api.diff.Difference;
+import org.openide.util.Lookup;
+import java.io.StringReader;
+import java.io.Reader;
+import java.io.Writer;
+import java.io.IOException;
 
 /**
  * Handles Model Context Protocol messages and provides NetBeans IDE capabilities
@@ -209,6 +218,12 @@ public class NetBeansMCPHandler {
             
         tools.add(createTool("closeAllDiffTabs", "Close all diff viewer tabs"));
         
+        tools.add(createTool("openDiff", "Open a diff viewer comparing two files",
+            "old_file_path", "string", "Path to the original file",
+            "new_file_path", "string", "Path to the modified file",
+            "new_file_contents", "string", "Contents of the modified file",
+            "tab_name", "string", "Name for the diff tab (optional)"));
+        
         ObjectNode result = responseBuilder.objectNode();
         result.set("tools", tools);
         return result;
@@ -289,6 +304,23 @@ public class NetBeansMCPHandler {
                     
                 case "closeAllDiffTabs":
                     return handleCloseAllDiffTabs();
+                    
+                case "openDiff":
+                    JsonNode oldFilePathNode = arguments.get("old_file_path");
+                    JsonNode newFilePathNode = arguments.get("new_file_path");
+                    JsonNode newFileContentsNode = arguments.get("new_file_contents");
+                    if (oldFilePathNode == null) {
+                        throw new IllegalArgumentException("Missing required parameter: old_file_path");
+                    }
+                    if (newFilePathNode == null) {
+                        throw new IllegalArgumentException("Missing required parameter: new_file_path");
+                    }
+                    if (newFileContentsNode == null) {
+                        throw new IllegalArgumentException("Missing required parameter: new_file_contents");
+                    }
+                    String tabName = arguments.has("tab_name") ? arguments.get("tab_name").asText() : null;
+                    return handleOpenDiff(oldFilePathNode.asText(), newFilePathNode.asText(), 
+                                        newFileContentsNode.asText(), tabName);
                     
                 default:
                     throw new IllegalArgumentException("Unknown tool: " + toolName);
@@ -838,6 +870,133 @@ public class NetBeansMCPHandler {
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Error closing diff tabs", e);
             return responseBuilder.createToolResponse("Error closing diff tabs: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Opens a diff viewer comparing two files.
+     */
+    private JsonNode handleOpenDiff(String oldFilePath, String newFilePath, 
+                                   String newFileContents, String tabName) {
+        try {
+            // Security check: Only allow diffing files within open project directories
+            if (!isPathWithinOpenProjects(oldFilePath)) {
+                throw new SecurityException("File access denied: old_file_path is not within any open project directory: " + oldFilePath);
+            }
+            if (!isPathWithinOpenProjects(newFilePath)) {
+                throw new SecurityException("File access denied: new_file_path is not within any open project directory: " + newFilePath);
+            }
+            
+            // Read the old file content
+            File oldFile = new File(oldFilePath);
+            if (!oldFile.exists()) {
+                return responseBuilder.createToolResponse("Old file does not exist: " + oldFilePath);
+            }
+            
+            String oldFileContents;
+            try {
+                oldFileContents = Files.readString(oldFile.toPath(), StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                return responseBuilder.createToolResponse("Failed to read old file: " + e.getMessage());
+            }
+            
+            // Create stream sources for diff
+            StreamSource oldSource = new StreamSource() {
+                @Override
+                public String getName() {
+                    return oldFile.getName() + " (original)";
+                }
+                
+                @Override
+                public String getTitle() {
+                    return oldFilePath;
+                }
+                
+                @Override
+                public String getMIMEType() {
+                    return "text/plain";
+                }
+                
+                @Override
+                public Reader createReader() throws IOException {
+                    return new StringReader(oldFileContents);
+                }
+                
+                @Override
+                public Writer createWriter(Difference[] conflicts) throws IOException {
+                    throw new IOException("Writing not supported for original file");
+                }
+            };
+            
+            StreamSource newSource = new StreamSource() {
+                @Override
+                public String getName() {
+                    return new File(newFilePath).getName() + " (modified)";
+                }
+                
+                @Override
+                public String getTitle() {
+                    return newFilePath;
+                }
+                
+                @Override
+                public String getMIMEType() {
+                    return "text/plain";
+                }
+                
+                @Override
+                public Reader createReader() throws IOException {
+                    return new StringReader(newFileContents);
+                }
+                
+                @Override
+                public Writer createWriter(Difference[] conflicts) throws IOException {
+                    throw new IOException("Writing not supported for modified content");
+                }
+            };
+            
+            // Get Diff service and create diff view
+            Diff diffService = Lookup.getDefault().lookup(Diff.class);
+            if (diffService != null) {
+                try {
+                    String diffTabName = tabName != null ? tabName : 
+                        "Diff: " + oldFile.getName() + " vs " + new File(newFilePath).getName();
+                        
+                    DiffView diffView = diffService.createDiff(oldSource, newSource);
+                    if (diffView != null) {
+                        // Open the diff view
+                        java.awt.Component component = diffView.getComponent();
+                        if (component instanceof TopComponent) {
+                            TopComponent diffTC = (TopComponent) component;
+                            diffTC.setDisplayName(diffTabName);
+                            diffTC.open();
+                            diffTC.requestActive();
+                        } else {
+                            // If it's not a TopComponent, try to show it in another way
+                            LOGGER.log(Level.WARNING, "Diff component is not a TopComponent: {0}", component.getClass());
+                        }
+                        
+                        ObjectNode result = responseBuilder.objectNode();
+                        result.put("success", true);
+                        result.put("tabName", diffTabName);
+                        result.put("oldFile", oldFilePath);
+                        result.put("newFile", newFilePath);
+                        result.put("message", "Diff viewer opened successfully");
+                        
+                        return responseBuilder.createToolResponse(result);
+                    } else {
+                        return responseBuilder.createToolResponse("Failed to create diff view");
+                    }
+                } catch (IOException e) {
+                    return responseBuilder.createToolResponse("Error creating diff: " + e.getMessage());
+                }
+            } else {
+                return responseBuilder.createToolResponse("Diff service not available");
+            }
+            
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Error opening diff", e);
+            return responseBuilder.createToolResponse("Error opening diff: " + e.getMessage());
         }
     }
     
