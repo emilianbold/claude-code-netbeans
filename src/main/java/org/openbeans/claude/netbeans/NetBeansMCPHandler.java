@@ -247,11 +247,11 @@ public class NetBeansMCPHandler {
             
         tools.add(createTool("closeAllDiffTabs", "Close all diff viewer tabs"));
         
-        tools.add(createTool("openDiff", "Open a diff viewer comparing two files",
-            "old_file_path", "string", "Path to the original file",
-            "new_file_path", "string", "Path to the modified file",
-            "new_file_contents", "string", "Contents of the modified file",
-            "tab_name", "string", "Name for the diff tab (optional)"));
+        tools.add(createToolWithOptionalParams("openDiff", "Open a git diff for the file",
+            new String[]{"old_file_path", "string", "Path to the file to show diff for. If missing, current editor will be used."},
+            new String[]{"new_file_path", "string", "Path to the file to show diff for. If missing, current editor will be used."},
+            new String[]{"new_file_contents", "string", "Contents of the new file. If missing, current file contents of new_file_path will be used."},
+            new String[]{"tab_name", "string", "Name for the diff tab"}));
         
         ObjectNode result = responseBuilder.objectNode();
         result.set("tools", tools);
@@ -336,21 +336,15 @@ public class NetBeansMCPHandler {
                     return handleCloseAllDiffTabs();
                     
                 case "openDiff":
-                    JsonNode oldFilePathNode = arguments.get("old_file_path");
-                    JsonNode newFilePathNode = arguments.get("new_file_path");
-                    JsonNode newFileContentsNode = arguments.get("new_file_contents");
-                    if (oldFilePathNode == null) {
-                        throw new IllegalArgumentException("Missing required parameter: old_file_path");
-                    }
-                    if (newFilePathNode == null) {
-                        throw new IllegalArgumentException("Missing required parameter: new_file_path");
-                    }
-                    if (newFileContentsNode == null) {
-                        throw new IllegalArgumentException("Missing required parameter: new_file_contents");
-                    }
-                    String tabName = arguments.has("tab_name") ? arguments.get("tab_name").asText() : null;
-                    return handleOpenDiff(oldFilePathNode.asText(), newFilePathNode.asText(), 
-                                        newFileContentsNode.asText(), tabName);
+                    String oldFilePath = arguments.has("old_file_path") && !arguments.get("old_file_path").isNull() 
+                        ? arguments.get("old_file_path").asText() : null;
+                    String newFilePath = arguments.has("new_file_path") && !arguments.get("new_file_path").isNull()
+                        ? arguments.get("new_file_path").asText() : null;
+                    String newFileContents = arguments.has("new_file_contents") && !arguments.get("new_file_contents").isNull()
+                        ? arguments.get("new_file_contents").asText() : null;
+                    String tabName = arguments.has("tab_name") && !arguments.get("tab_name").isNull()
+                        ? arguments.get("tab_name").asText() : null;
+                    return handleOpenDiff(oldFilePath, newFilePath, newFileContents, tabName);
                     
                 default:
                     throw new IllegalArgumentException("Unknown tool: " + toolName);
@@ -1037,31 +1031,84 @@ public class NetBeansMCPHandler {
     
     /**
      * Opens a diff viewer comparing two files.
+     * If file paths are not provided, uses the current active editor.
      */
     private JsonNode handleOpenDiff(String oldFilePath, String newFilePath, 
                                    String newFileContents, String tabName) {
         try {
-            // Security check: Only allow diffing files within open project directories
-            if (!isPathWithinOpenProjects(oldFilePath)) {
-                throw new SecurityException("File access denied: old_file_path is not within any open project directory: " + oldFilePath);
+            // Track if we're using the current editor for defaults
+            boolean usingCurrentEditor = false;
+            String currentEditorPath = null;
+            String currentEditorContent = null;
+            
+            // If paths are not provided, use current active editor
+            String finalOldFilePath;
+            String finalNewFilePath;
+            if (oldFilePath == null || newFilePath == null) {
+                currentEditorPath = getCurrentEditorFilePath();
+                if (currentEditorPath == null) {
+                    return responseBuilder.createToolResponse("No active editor found. Please specify file paths or open a file in the editor.");
+                }
+                usingCurrentEditor = true;
+                currentEditorContent = getCurrentEditorContent(); // Get the buffer content with unsaved changes
+                finalOldFilePath = (oldFilePath == null) ? currentEditorPath : oldFilePath;
+                finalNewFilePath = (newFilePath == null) ? currentEditorPath : newFilePath;
+            } else {
+                finalOldFilePath = oldFilePath;
+                finalNewFilePath = newFilePath;
             }
-            if (!isPathWithinOpenProjects(newFilePath)) {
-                throw new SecurityException("File access denied: new_file_path is not within any open project directory: " + newFilePath);
+            
+            // Security check: Only allow diffing files within open project directories
+            if (!isPathWithinOpenProjects(finalOldFilePath)) {
+                throw new SecurityException("File access denied: old_file_path is not within any open project directory: " + finalOldFilePath);
+            }
+            if (!isPathWithinOpenProjects(finalNewFilePath)) {
+                throw new SecurityException("File access denied: new_file_path is not within any open project directory: " + finalNewFilePath);
             }
             
             // Read the old file content
-            File oldFile = new File(oldFilePath);
-            if (!oldFile.exists()) {
-                LOGGER.warning("Old file does not exist for diff: " + oldFilePath);
-                return responseBuilder.createToolResponse("Old file does not exist: " + oldFilePath);
+            final File oldFile = new File(finalOldFilePath);
+            final String oldFileContents;
+            
+            // If old file is the current editor and we're using it as default, use the editor buffer content
+            if (usingCurrentEditor && oldFilePath == null && finalOldFilePath.equals(currentEditorPath) && currentEditorContent != null) {
+                oldFileContents = currentEditorContent;
+            } else {
+                // Otherwise read from disk
+                if (!oldFile.exists()) {
+                    LOGGER.warning("Old file does not exist for diff: " + finalOldFilePath);
+                    return responseBuilder.createToolResponse("Old file does not exist: " + finalOldFilePath);
+                }
+                try {
+                    oldFileContents = Files.readString(oldFile.toPath(), StandardCharsets.UTF_8);
+                } catch (IOException e) {
+                    LOGGER.log(Level.WARNING, "Failed to read old file for diff: " + finalOldFilePath, e);
+                    return responseBuilder.createToolResponse("Failed to read old file: " + e.getMessage());
+                }
             }
             
-            String oldFileContents;
-            try {
-                oldFileContents = Files.readString(oldFile.toPath(), StandardCharsets.UTF_8);
-            } catch (IOException e) {
-                LOGGER.log(Level.WARNING, "Failed to read old file for diff: " + oldFilePath, e);
-                return responseBuilder.createToolResponse("Failed to read old file: " + e.getMessage());
+            // If new file contents not provided, determine how to get them
+            final String finalNewFileContents;
+            if (newFileContents == null) {
+                // If new file is the current editor and we're using it as default, use the editor buffer content
+                if (usingCurrentEditor && newFilePath == null && finalNewFilePath.equals(currentEditorPath) && currentEditorContent != null) {
+                    finalNewFileContents = currentEditorContent;
+                } else {
+                    // Otherwise read from disk
+                    File newFile = new File(finalNewFilePath);
+                    if (!newFile.exists()) {
+                        LOGGER.warning("New file does not exist for diff: " + finalNewFilePath);
+                        return responseBuilder.createToolResponse("New file does not exist: " + finalNewFilePath);
+                    }
+                    try {
+                        finalNewFileContents = Files.readString(newFile.toPath(), StandardCharsets.UTF_8);
+                    } catch (IOException e) {
+                        LOGGER.log(Level.WARNING, "Failed to read new file for diff: " + finalNewFilePath, e);
+                        return responseBuilder.createToolResponse("Failed to read new file: " + e.getMessage());
+                    }
+                }
+            } else {
+                finalNewFileContents = newFileContents;
             }
             
             // Create stream sources for diff
@@ -1073,7 +1120,7 @@ public class NetBeansMCPHandler {
                 
                 @Override
                 public String getTitle() {
-                    return oldFilePath;
+                    return finalOldFilePath;
                 }
                 
                 @Override
@@ -1095,12 +1142,12 @@ public class NetBeansMCPHandler {
             StreamSource newSource = new StreamSource() {
                 @Override
                 public String getName() {
-                    return new File(newFilePath).getName() + " (modified)";
+                    return new File(finalNewFilePath).getName() + " (modified)";
                 }
                 
                 @Override
                 public String getTitle() {
-                    return newFilePath;
+                    return finalNewFilePath;
                 }
                 
                 @Override
@@ -1110,7 +1157,7 @@ public class NetBeansMCPHandler {
                 
                 @Override
                 public Reader createReader() throws IOException {
-                    return new StringReader(newFileContents);
+                    return new StringReader(finalNewFileContents);
                 }
                 
                 @Override
@@ -1124,7 +1171,7 @@ public class NetBeansMCPHandler {
             if (diffService != null) {
                 try {
                     String diffTabName = tabName != null ? tabName : 
-                        "Diff: " + oldFile.getName() + " vs " + new File(newFilePath).getName();
+                        "Diff: " + oldFile.getName() + " vs " + new File(finalNewFilePath).getName();
                         
                     DiffView diffView = diffService.createDiff(oldSource, newSource);
                     if (diffView != null) {
@@ -1143,8 +1190,8 @@ public class NetBeansMCPHandler {
                         ObjectNode result = responseBuilder.objectNode();
                         result.put("success", true);
                         result.put("tabName", diffTabName);
-                        result.put("oldFile", oldFilePath);
-                        result.put("newFile", newFilePath);
+                        result.put("oldFile", finalOldFilePath);
+                        result.put("newFile", finalNewFilePath);
                         result.put("message", "Diff viewer opened successfully");
                         
                         return responseBuilder.createToolResponse(result);
@@ -1231,6 +1278,39 @@ public class NetBeansMCPHandler {
         return tool;
     }
     
+    private ObjectNode createToolWithOptionalParams(String name, String description, String[]... params) {
+        ObjectNode tool = responseBuilder.objectNode();
+        tool.put("name", name);
+        tool.put("description", description);
+        
+        ObjectNode inputSchema = responseBuilder.objectNode();
+        inputSchema.put("type", "object");
+        ObjectNode properties = responseBuilder.objectNode();
+        ArrayNode required = responseBuilder.arrayNode();
+        
+        for (String[] param : params) {
+            if (param.length >= 3) {
+                String paramName = param[0];
+                String paramType = param[1];
+                String paramDesc = param[2];
+                
+                ObjectNode paramNode = responseBuilder.objectNode();
+                paramNode.put("type", paramType);
+                paramNode.put("description", paramDesc);
+                properties.set(paramName, paramNode);
+                // Don't add to required array - all params are optional
+            }
+        }
+        
+        inputSchema.set("properties", properties);
+        if (required.size() > 0) {
+            inputSchema.set("required", required);
+        }
+        tool.set("inputSchema", inputSchema);
+        
+        return tool;
+    }
+    
     private ObjectNode objectNode() {
         return responseBuilder.objectNode();
     }
@@ -1246,6 +1326,68 @@ public class NetBeansMCPHandler {
             // Stop tracking when disconnected
             stopSelectionTracking();
         }
+    }
+    
+    /**
+     * Gets the file path of the currently active editor.
+     * 
+     * @return the absolute path of the file in the active editor, or null if no editor is active
+     */
+    private String getCurrentEditorFilePath() {
+        try {
+            TopComponent activated = TopComponent.getRegistry().getActivated();
+            if (activated != null) {
+                Node[] nodes = activated.getActivatedNodes();
+                if (nodes != null && nodes.length > 0) {
+                    DataObject dataObject = nodes[0].getLookup().lookup(DataObject.class);
+                    if (dataObject != null) {
+                        FileObject fileObject = dataObject.getPrimaryFile();
+                        if (fileObject != null) {
+                            File file = FileUtil.toFile(fileObject);
+                            if (file != null) {
+                                return file.getAbsolutePath();
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Error getting current editor file path", e);
+        }
+        return null;
+    }
+    
+    /**
+     * Gets the content of the currently active editor from its document buffer.
+     * This includes any unsaved changes.
+     * 
+     * @return the content of the active editor, or null if no editor is active
+     */
+    private String getCurrentEditorContent() {
+        try {
+            TopComponent activated = TopComponent.getRegistry().getActivated();
+            if (activated != null) {
+                Node[] nodes = activated.getActivatedNodes();
+                if (nodes != null && nodes.length > 0) {
+                    EditorCookie editorCookie = nodes[0].getLookup().lookup(EditorCookie.class);
+                    if (editorCookie != null) {
+                        Document doc = editorCookie.getDocument();
+                        if (doc != null) {
+                            return doc.getText(0, doc.getLength());
+                        } else {
+                            // Document not yet loaded, open it first
+                            doc = editorCookie.openDocument();
+                            if (doc != null) {
+                                return doc.getText(0, doc.getLength());
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Error getting current editor content", e);
+        }
+        return null;
     }
     
     /**
