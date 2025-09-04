@@ -36,7 +36,6 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
-import java.io.FileNotFoundException;
 import org.netbeans.api.project.ui.OpenProjects;
 import org.netbeans.api.diff.Diff;
 import org.netbeans.api.diff.DiffView;
@@ -50,8 +49,8 @@ import java.io.IOException;
 import org.netbeans.editor.Annotations;
 import org.netbeans.editor.AnnotationDesc;
 import org.openbeans.claude.netbeans.tools.CloseAllDiffTabs;
+import org.openbeans.claude.netbeans.tools.SaveDocument;
 import org.openbeans.claude.netbeans.tools.params.*;
-import org.openide.loaders.DataObjectNotFoundException;
 
 /**
  * Handles Model Context Protocol messages and provides NetBeans IDE capabilities
@@ -95,10 +94,12 @@ public class NetBeansMCPHandler {
     private JTextComponent currentTextComponent;
     
     private final CloseAllDiffTabs closeAllDiffTabsTool;
+    private final SaveDocument saveDocument;
 
     public NetBeansMCPHandler() {
         this.responseBuilder = new MCPResponseBuilder(objectMapper);
         this.closeAllDiffTabsTool = new CloseAllDiffTabs();
+        this.saveDocument = new SaveDocument();
     }
     
     /**
@@ -275,11 +276,10 @@ public class NetBeansMCPHandler {
                     return handleCheckDocumentDirty(dirtyParams.getFilePath());
                     
                 case "saveDocument":
-                    SaveDocumentParams saveParams = mapper.convertValue(arguments, SaveDocumentParams.class);
-                    return handleSaveDocument(saveParams.getFilePath());
+                    return this.saveDocument.run(this.saveDocument.parseArguments(arguments), responseBuilder);
                     
                 case "closeAllDiffTabs":
-                    return handleCloseAllDiffTabs();
+                    return this.closeAllDiffTabsTool.run(this.closeAllDiffTabsTool.parseArguments(arguments), responseBuilder);
                     
                 case "openDiff":
                     OpenDiffParams diffParams = mapper.convertValue(arguments, OpenDiffParams.class);
@@ -386,7 +386,7 @@ public class NetBeansMCPHandler {
     
     private JsonNode handleReadFile(String filePath) throws IOException {
         // Security check: Only allow reading files within open project directories
-        if (!isPathWithinOpenProjects(filePath)) {
+        if (!NbUtils.isPathWithinOpenProjects(filePath)) {
             throw new SecurityException("File read denied: Path is not within any open project directory: " + filePath);
         }
         
@@ -492,7 +492,7 @@ public class NetBeansMCPHandler {
     private JsonNode handleOpenFile(String filePath, boolean preview) {
         try {
             // Security check: Only allow opening files within open project directories
-            if (!isPathWithinOpenProjects(filePath)) {
+            if (!NbUtils.isPathWithinOpenProjects(filePath)) {
                 throw new SecurityException("File open denied: Path is not within any open project directory: " + filePath);
             }
             
@@ -632,7 +632,7 @@ public class NetBeansMCPHandler {
             String filePath = uri.startsWith("file://") ? uri.substring(7) : uri;
             
             // Security check: Only allow files within open projects
-            if (!isPathWithinOpenProjects(filePath)) {
+            if (!NbUtils.isPathWithinOpenProjects(filePath)) {
                 throw new SecurityException("File access denied: Path is not within any open project directory: " + filePath);
             }
             
@@ -794,7 +794,7 @@ public class NetBeansMCPHandler {
     private JsonNode handleCheckDocumentDirty(String filePath) {
         try {
             // Security check: Only allow checking files within open project directories
-            if (!isPathWithinOpenProjects(filePath)) {
+            if (!NbUtils.isPathWithinOpenProjects(filePath)) {
                 throw new SecurityException("File access denied: Path is not within any open project directory: " + filePath);
             }
             
@@ -839,49 +839,6 @@ public class NetBeansMCPHandler {
     }
     
     /**
-     * Saves a document to disk.
-     */
-    private JsonNode handleSaveDocument(String filePath) throws FileNotFoundException, DataObjectNotFoundException, IOException {
-            // Security check: Only allow saving files within open project directories
-            if (!isPathWithinOpenProjects(filePath)) {
-                throw new SecurityException("File save denied: Path is not within any open project directory: " + filePath);
-            }
-            
-            File file = new File(filePath);
-            FileObject fileObject = FileUtil.toFileObject(file);
-            
-            if (fileObject == null) {
-                throw new FileNotFoundException(filePath);
-            }
-            DataObject dataObject = DataObject.find(fileObject);
-            if (dataObject == null) {
-                // not really possible as find would throw DataObjectNotFoundException
-                throw new NullPointerException("dataObject");
-            }
-            EditorCookie editorCookie = dataObject.getLookup().lookup(EditorCookie.class);
-
-            if (editorCookie == null) {
-                throw new IllegalStateException("File is not editable or not currently managed by an editor");
-            }
-            // Save the document
-            editorCookie.saveDocument();
-
-            ObjectNode result = responseBuilder.objectNode();
-            result.put("filePath", filePath);
-            result.put("saved", true);
-            result.put("message", "Document saved successfully");
-
-            return responseBuilder.createToolResponse(result);
-    }
-    
-    /**
-     * Closes all diff viewer tabs.
-     */
-    private JsonNode handleCloseAllDiffTabs() {
-        return this.closeAllDiffTabsTool.run(responseBuilder);
-    }
-    
-    /**
      * Opens a diff viewer comparing two files.
      * If file paths are not provided, uses the current active editor.
      */
@@ -911,10 +868,10 @@ public class NetBeansMCPHandler {
             }
             
             // Security check: Only allow diffing files within open project directories
-            if (!isPathWithinOpenProjects(finalOldFilePath)) {
+            if (!NbUtils.isPathWithinOpenProjects(finalOldFilePath)) {
                 throw new SecurityException("File access denied: old_file_path is not within any open project directory: " + finalOldFilePath);
             }
-            if (!isPathWithinOpenProjects(finalNewFilePath)) {
+            if (!NbUtils.isPathWithinOpenProjects(finalNewFilePath)) {
                 throw new SecurityException("File access denied: new_file_path is not within any open project directory: " + finalNewFilePath);
             }
             
@@ -1214,45 +1171,7 @@ public class NetBeansMCPHandler {
         }
         return null;
     }
-    
-    /**
-     * Security validation: Checks if the given file path is within any open project directory.
-     * This prevents unauthorized file operations outside of the user's active workspace.
-     * 
-     * @param filePath the file path to validate
-     * @return true if the path is within an open project, false otherwise
-     */
-    private boolean isPathWithinOpenProjects(String filePath) {
-        try {
-            File targetFile = new File(filePath).getCanonicalFile();
-            String targetPath = targetFile.getAbsolutePath();
-            
-            // Get all open projects
-            Project[] openProjects = OpenProjects.getDefault().getOpenProjects();
-            
-            for (Project project : openProjects) {
-                FileObject projectDir = project.getProjectDirectory();
-                if (projectDir != null) {
-                    File projectFile = new File(projectDir.getPath()).getCanonicalFile();
-                    String projectPath = projectFile.getAbsolutePath();
-                    
-                    // Check if target path is within this project directory
-                    if (targetPath.startsWith(projectPath + File.separator) || targetPath.equals(projectPath)) {
-                        LOGGER.log(Level.FINE, "File path {0} is within project: {1}", 
-                                  new Object[]{filePath, projectPath});
-                        return true;
-                    }
-                }
-            }
-            
-            LOGGER.log(Level.WARNING, "File path {0} is not within any open project directory", filePath);
-            return false;
-            
-        } catch (IOException e) {
-            LOGGER.log(Level.WARNING, "Error validating file path: " + filePath, e);
-            return false; // Deny access on any path resolution errors
-        }
-    }
+   
     
     /**
      * Starts tracking selection changes in editors.

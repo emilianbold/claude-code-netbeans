@@ -6,16 +6,23 @@ import java.util.logging.Logger;
 import org.openbeans.claude.netbeans.MCPResponseBuilder;
 import org.openide.windows.TopComponent;
 
-public class CloseAllDiffTabs {
+public class CloseAllDiffTabs implements Tool<org.openbeans.claude.netbeans.tools.params.CloseAllDiffTabs> {
 
     private static final Logger LOGGER = Logger.getLogger(CloseAllDiffTabs.class.getName());
 
+    @Override
     public String getName() {
         return "closeAllDiffTabs";
     }
 
+    @Override
     public String getDescription() {
         return "Close all diff viewer tabs";
+    }
+
+    @Override
+    public Class<org.openbeans.claude.netbeans.tools.params.CloseAllDiffTabs> getParameterClass() {
+        return org.openbeans.claude.netbeans.tools.params.CloseAllDiffTabs.class;
     }
 
     private int closeAllDiffTabs() {
@@ -56,7 +63,8 @@ public class CloseAllDiffTabs {
         return closedCount;
     }
 
-    public JsonNode run(MCPResponseBuilder r) {
+    @Override
+    public JsonNode run(org.openbeans.claude.netbeans.tools.params.CloseAllDiffTabs params, MCPResponseBuilder r) {
         int count = this.closeAllDiffTabs();
 
         // This is the format expected, at least for 0 tabs...
