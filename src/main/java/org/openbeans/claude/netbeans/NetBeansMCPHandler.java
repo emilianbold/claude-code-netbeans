@@ -226,17 +226,6 @@ public class NetBeansMCPHandler {
         
         tools.add(createTool("getCurrentSelection", "Get the current text selection in the active editor"));
         
-        // Additional file operations (Claude Code compatible)
-        tools.add(createTool("read_file", "Read file contents (within open projects only)", 
-            "path", "string", "Path to the file to read (must be within an open project)"));
-        
-        tools.add(createTool("write_file", "Write file contents (within open projects only)",
-            "path", "string", "Path to the file to write (must be within an open project)",
-            "content", "string", "Content to write to the file"));
-        
-        tools.add(createTool("list_files", "List files in directory (within open projects only)",
-            "path", "string", "Directory path to list (must be within an open project)"));
-        
         tools.add(createTool("close_tab", "Close an open editor tab",
             "tab_name", "string", "Name of the tab to close"));
         
@@ -284,32 +273,6 @@ public class NetBeansMCPHandler {
                     
                 case "getCurrentSelection":
                     return handleGetCurrentSelection();
-                    
-                // File operations
-                case "read_file":
-                    JsonNode pathNode = arguments.get("path");
-                    if (pathNode == null) {
-                        throw new IllegalArgumentException("Missing required parameter: path");
-                    }
-                    return handleReadFile(pathNode.asText());
-                    
-                case "write_file":
-                    JsonNode writePathNode = arguments.get("path");
-                    JsonNode contentNode = arguments.get("content");
-                    if (writePathNode == null) {
-                        throw new IllegalArgumentException("Missing required parameter: path");
-                    }
-                    if (contentNode == null) {
-                        throw new IllegalArgumentException("Missing required parameter: content");
-                    }
-                    return handleWriteFile(writePathNode.asText(), contentNode.asText());
-                    
-                case "list_files":
-                    JsonNode listPathNode = arguments.get("path");
-                    if (listPathNode == null) {
-                        throw new IllegalArgumentException("Missing required parameter: path");
-                    }
-                    return handleListFiles(listPathNode.asText());
                     
                 case "close_tab":
                     JsonNode closeTabNameNode = arguments.get("tab_name");
@@ -455,43 +418,6 @@ public class NetBeansMCPHandler {
         String content = Files.readString(path, StandardCharsets.UTF_8);
         
         return responseBuilder.createToolResponse(content);
-    }
-    
-    private JsonNode handleWriteFile(String filePath, String content) throws IOException {
-        // Security check: Only allow writing to files within open project directories
-        if (!isPathWithinOpenProjects(filePath)) {
-            throw new SecurityException("File write denied: Path is not within any open project directory: " + filePath);
-        }
-        
-        Path path = Paths.get(filePath);
-        Files.createDirectories(path.getParent());
-        Files.writeString(path, content, StandardCharsets.UTF_8);
-        
-        return responseBuilder.createToolResponse("File written successfully: " + filePath);
-    }
-    
-    private JsonNode handleListFiles(String dirPath) {
-        // Security check: Only allow listing directories within open project directories
-        if (!isPathWithinOpenProjects(dirPath)) {
-            throw new SecurityException("Directory listing denied: Path is not within any open project directory: " + dirPath);
-        }
-        
-        File dir = new File(dirPath);
-        File[] files = dir.listFiles();
-        
-        ArrayNode fileList = responseBuilder.arrayNode();
-        if (files != null) {
-            for (File file : files) {
-                ObjectNode fileInfo = responseBuilder.objectNode();
-                fileInfo.put("name", file.getName());
-                fileInfo.put("path", file.getAbsolutePath());
-                fileInfo.put("isDirectory", file.isDirectory());
-                fileInfo.put("size", file.length());
-                fileList.add(fileInfo);
-            }
-        }
-        
-        return responseBuilder.createToolResponse(fileList);
     }
     
     private JsonNode handleGetOpenProjects() {
