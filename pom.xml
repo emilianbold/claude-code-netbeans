@@ -210,6 +210,37 @@
                     </archive>
                 </configuration>
             </plugin>
+            
+            <!-- Generate POJOs from JSON Schema -->
+            <plugin>
+                <groupId>org.jsonschema2pojo</groupId>
+                <artifactId>jsonschema2pojo-maven-plugin</artifactId>
+                <version>1.2.1</version>
+                <configuration>
+                    <sourceDirectory>${basedir}/src/main/resources/org/openbeans/claude/netbeans/tools/schemas</sourceDirectory>
+                    <targetPackage>org.openbeans.claude.netbeans.tools.params</targetPackage>
+                    <outputDirectory>${project.build.directory}/generated-sources/jsonschema2pojo</outputDirectory>
+                    <generateBuilders>true</generateBuilders>
+                    <includeConstructors>true</includeConstructors>
+                    <includeAdditionalProperties>false</includeAdditionalProperties>
+                    <includeHashcodeAndEquals>true</includeHashcodeAndEquals>
+                    <includeToString>true</includeToString>
+                    <annotationStyle>jackson2</annotationStyle>
+                    <propertyWordDelimiters>_</propertyWordDelimiters>
+                    <usePrimitives>false</usePrimitives>
+                    <useDoubleNumbers>false</useDoubleNumbers>
+                    <includeDynamicAccessors>false</includeDynamicAccessors>
+                    <includeJsr303Annotations>false</includeJsr303Annotations>
+                    <sourceType>jsonschema</sourceType>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 </project>

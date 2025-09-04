@@ -1,0 +1,11 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "tab_name": {
+      "type": "string",
+      "description": "Name of the tab to close"
+    }
+  },
+  "required": ["tab_name"]
+}

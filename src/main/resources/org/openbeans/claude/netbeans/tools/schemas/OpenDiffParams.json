@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "old_file_path": {
+      "type": "string",
+      "description": "Path to the file to show diff for. If missing, current editor will be used."
+    },
+    "new_file_path": {
+      "type": "string",
+      "description": "Path to the file to show diff for. If missing, current editor will be used."
+    },
+    "new_file_contents": {
+      "type": "string",
+      "description": "Contents of the new file. If missing, current file contents of new_file_path will be used."
+    },
+    "tab_name": {
+      "type": "string",
+      "description": "Name for the diff tab"
+    }
+  },
+  "required": []
+}

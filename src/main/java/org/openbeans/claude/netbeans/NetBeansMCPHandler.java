@@ -23,6 +23,7 @@ import javax.swing.event.CaretEvent;
 import javax.swing.event.CaretListener;
 import org.openide.text.NbDocument;
 import java.io.File;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -48,13 +49,14 @@ import java.io.IOException;
 import org.netbeans.editor.Annotations;
 import org.netbeans.editor.AnnotationDesc;
 import org.openbeans.claude.netbeans.tools.CloseAllDiffTabs;
+import org.openbeans.claude.netbeans.tools.params.*;
 
 /**
  * Handles Model Context Protocol messages and provides NetBeans IDE capabilities
  * to Claude Code through MCP primitives (Tools, Resources, Prompts).
  */
 public class NetBeansMCPHandler {
-    
+
     /**
      * Data class to hold diagnostic information (errors, warnings) from NetBeans.
      */
@@ -215,36 +217,17 @@ public class NetBeansMCPHandler {
     private JsonNode handleToolsList() {
         ArrayNode tools = responseBuilder.arrayNode();
         
-        // Core Claude Code tools
-        tools.add(createTool("openFile", "Opens a file in the editor", 
-            "path", "string", "Path to the file to open",
-            "preview", "boolean", "Whether to open in preview mode"));
-        
-        tools.add(createTool("getWorkspaceFolders", "Get list of workspace folders (open projects)"));
-        
-        tools.add(createTool("getOpenEditors", "Get list of currently open editor tabs"));
-        
-        tools.add(createTool("getCurrentSelection", "Get the current text selection in the active editor"));
-        
-        tools.add(createTool("close_tab", "Close an open editor tab",
-            "tab_name", "string", "Name of the tab to close"));
-        
-        tools.add(createTool("getDiagnostics", "Get diagnostic information (errors, warnings) for files",
-            "uri", "string", "Optional URI of specific file to get diagnostics for"));
-        
-        tools.add(createTool("checkDocumentDirty", "Check if a document has unsaved changes",
-            "filePath", "string", "Path to the file to check"));
-            
-        tools.add(createTool("saveDocument", "Save a document to disk",
-            "filePath", "string", "Path to the file to save"));
-            
-        tools.add(createTool(this.closeAllDiffTabsTool.getName(), this.closeAllDiffTabsTool.getDescription()));
-        
-        tools.add(createToolWithOptionalParams("openDiff", "Open a git diff for the file",
-            new String[]{"old_file_path", "string", "Path to the file to show diff for. If missing, current editor will be used."},
-            new String[]{"new_file_path", "string", "Path to the file to show diff for. If missing, current editor will be used."},
-            new String[]{"new_file_contents", "string", "Contents of the new file. If missing, current file contents of new_file_path will be used."},
-            new String[]{"tab_name", "string", "Name for the diff tab"}));
+        // Core Claude Code tools - names/descriptions in code, schemas from JSON
+        tools.add(createToolDefinition("openFile", "Opens a file in the editor", "OpenFileParams"));
+        tools.add(createToolDefinition("getWorkspaceFolders", "Get list of workspace folders (open projects)", "getWorkspaceFolders"));
+        tools.add(createToolDefinition("getOpenEditors", "Get list of currently open editor tabs", "getOpenEditors"));
+        tools.add(createToolDefinition("getCurrentSelection", "Get the current text selection in the active editor", "getCurrentSelection"));
+        tools.add(createToolDefinition("close_tab", "Close an open editor tab", "CloseTabParams"));
+        tools.add(createToolDefinition("getDiagnostics", "Get diagnostic information (errors, warnings) for files", "GetDiagnosticsParams"));
+        tools.add(createToolDefinition("checkDocumentDirty", "Check if a document has unsaved changes", "CheckDocumentDirtyParams"));
+        tools.add(createToolDefinition("saveDocument", "Save a document to disk", "SaveDocumentParams"));
+        tools.add(createToolDefinition("closeAllDiffTabs", "Close all diff viewer tabs", "closeAllDiffTabs"));
+        tools.add(createToolDefinition("openDiff", "Open a git diff for the file", "OpenDiffParams"));
         
         ObjectNode result = responseBuilder.objectNode();
         result.set("tools", tools);
@@ -259,11 +242,14 @@ public class NetBeansMCPHandler {
         JsonNode arguments = params.get("arguments");
         
         try {
+            ObjectMapper mapper = new ObjectMapper();
+            
             switch (toolName) {
                 // Core Claude Code tools
                 case "openFile":
-                    return handleOpenFile(arguments.get("path").asText(), 
-                                        arguments.has("preview") ? arguments.get("preview").asBoolean() : false);
+                    OpenFileParams openFileParams = mapper.convertValue(arguments, OpenFileParams.class);
+                    return handleOpenFile(openFileParams.getPath(), 
+                                        openFileParams.getPreview() != null ? openFileParams.getPreview() : false);
                     
                 case "getWorkspaceFolders":
                     return handleGetWorkspaceFolders();
@@ -275,43 +261,31 @@ public class NetBeansMCPHandler {
                     return handleGetCurrentSelection();
                     
                 case "close_tab":
-                    JsonNode closeTabNameNode = arguments.get("tab_name");
-                    if (closeTabNameNode == null) {
-                        throw new IllegalArgumentException("Missing required parameter: tab_name");
-                    }
-                    return handleCloseTab(closeTabNameNode.asText());
+                    CloseTabParams closeTabParams = mapper.convertValue(arguments, CloseTabParams.class);
+                    return handleCloseTab(closeTabParams.getTabName());
                     
                 case "getDiagnostics":
-                    String uri = arguments.has("uri") ? arguments.get("uri").asText() : null;
-                    return handleGetDiagnostics(uri);
+                    GetDiagnosticsParams diagnosticsParams = mapper.convertValue(arguments, GetDiagnosticsParams.class);
+                    return handleGetDiagnostics(diagnosticsParams.getUri());
                     
                 case "checkDocumentDirty":
-                    JsonNode dirtyPathNode = arguments.get("filePath");
-                    if (dirtyPathNode == null) {
-                        throw new IllegalArgumentException("Missing required parameter: filePath");
-                    }
-                    return handleCheckDocumentDirty(dirtyPathNode.asText());
+                    CheckDocumentDirtyParams dirtyParams = mapper.convertValue(arguments, CheckDocumentDirtyParams.class);
+                    return handleCheckDocumentDirty(dirtyParams.getFilePath());
                     
                 case "saveDocument":
-                    JsonNode savePathNode = arguments.get("filePath");
-                    if (savePathNode == null) {
-                        throw new IllegalArgumentException("Missing required parameter: filePath");
-                    }
-                    return handleSaveDocument(savePathNode.asText());
+                    SaveDocumentParams saveParams = mapper.convertValue(arguments, SaveDocumentParams.class);
+                    return handleSaveDocument(saveParams.getFilePath());
                     
                 case "closeAllDiffTabs":
                     return handleCloseAllDiffTabs();
                     
                 case "openDiff":
-                    String oldFilePath = arguments.has("old_file_path") && !arguments.get("old_file_path").isNull() 
-                        ? arguments.get("old_file_path").asText() : null;
-                    String newFilePath = arguments.has("new_file_path") && !arguments.get("new_file_path").isNull()
-                        ? arguments.get("new_file_path").asText() : null;
-                    String newFileContents = arguments.has("new_file_contents") && !arguments.get("new_file_contents").isNull()
-                        ? arguments.get("new_file_contents").asText() : null;
-                    String tabName = arguments.has("tab_name") && !arguments.get("tab_name").isNull()
-                        ? arguments.get("tab_name").asText() : null;
-                    return handleOpenDiff(oldFilePath, newFilePath, newFileContents, tabName);
+                    OpenDiffParams diffParams = mapper.convertValue(arguments, OpenDiffParams.class);
+                    return handleOpenDiff(
+                        diffParams.getOldFilePath(), 
+                        diffParams.getNewFilePath(), 
+                        diffParams.getNewFileContents(), 
+                        diffParams.getTabName());
                     
                 default:
                     throw new IllegalArgumentException("Unknown tool: " + toolName);
@@ -1135,64 +1109,42 @@ public class NetBeansMCPHandler {
         return projectInfo;
     }
     
-    private ObjectNode createTool(String name, String description, String... params) {
+    private ObjectNode createToolDefinition(String toolName, String description, String schemaFileName) {
         ObjectNode tool = responseBuilder.objectNode();
-        tool.put("name", name);
+        tool.put("name", toolName);
         tool.put("description", description);
         
-        ObjectNode inputSchema = responseBuilder.objectNode();
-        inputSchema.put("type", "object");
-        ObjectNode properties = responseBuilder.objectNode();
-        ArrayNode required = responseBuilder.arrayNode();
-        
-        for (int i = 0; i < params.length; i += 3) {
-            String paramName = params[i];
-            String paramType = params[i + 1];
-            String paramDesc = i + 2 < params.length ? params[i + 2] : "";
+        try {
+            // Load parameter schema from JSON file
+            String schemaPath = "/org/openbeans/claude/netbeans/tools/schemas/" + schemaFileName + ".json";
+            InputStream inputStream = getClass().getResourceAsStream(schemaPath);
             
-            ObjectNode param = responseBuilder.objectNode();
-            param.put("type", paramType);
-            param.put("description", paramDesc);
-            properties.set(paramName, param);
-            required.add(paramName);
-        }
-        
-        inputSchema.set("properties", properties);
-        inputSchema.set("required", required);
-        tool.set("inputSchema", inputSchema);
-        
-        return tool;
-    }
-    
-    private ObjectNode createToolWithOptionalParams(String name, String description, String[]... params) {
-        ObjectNode tool = responseBuilder.objectNode();
-        tool.put("name", name);
-        tool.put("description", description);
-        
-        ObjectNode inputSchema = responseBuilder.objectNode();
-        inputSchema.put("type", "object");
-        ObjectNode properties = responseBuilder.objectNode();
-        ArrayNode required = responseBuilder.arrayNode();
-        
-        for (String[] param : params) {
-            if (param.length >= 3) {
-                String paramName = param[0];
-                String paramType = param[1];
-                String paramDesc = param[2];
+            if (inputStream == null) {
+                // Fall back to empty schema if file not found
+                LOGGER.warning("Schema file not found: " + schemaPath);
+                ObjectNode inputSchema = responseBuilder.objectNode();
+                inputSchema.put("type", "object");
+                inputSchema.set("properties", responseBuilder.objectNode());
+                inputSchema.set("required", responseBuilder.arrayNode());
+                tool.set("inputSchema", inputSchema);
+            } else {
+                ObjectMapper mapper = new ObjectMapper();
+                JsonNode schema = mapper.readTree(inputStream);
+                inputStream.close();
                 
-                ObjectNode paramNode = responseBuilder.objectNode();
-                paramNode.put("type", paramType);
-                paramNode.put("description", paramDesc);
-                properties.set(paramName, paramNode);
-                // Don't add to required array - all params are optional
+                // Set the loaded schema as inputSchema
+                tool.set("inputSchema", schema);
             }
+            
+        } catch (IOException e) {
+            LOGGER.log(Level.WARNING, "Error loading parameter schema for: " + toolName, e);
+            // Return minimal schema as fallback
+            ObjectNode inputSchema = responseBuilder.objectNode();
+            inputSchema.put("type", "object");
+            inputSchema.set("properties", responseBuilder.objectNode());
+            inputSchema.set("required", responseBuilder.arrayNode());
+            tool.set("inputSchema", inputSchema);
         }
-        
-        inputSchema.set("properties", properties);
-        if (required.size() > 0) {
-            inputSchema.set("required", required);
-        }
-        tool.set("inputSchema", inputSchema);
         
         return tool;
     }
