@@ -522,11 +522,14 @@ public class NetBeansMCPHandler {
     private JsonNode handleGetWorkspaceFolders() {
         ArrayNode folders = responseBuilder.arrayNode();
         
-        Project[] openProjects = OpenProjects.getDefault().getOpenProjects();
-        for (Project project : openProjects) {
+        // Get project data using existing method
+        List<ProjectData> projectDataList = getOpenProjectsData();
+        
+        // Build MCP response from the data
+        for (ProjectData projectData : projectDataList) {
             ObjectNode folderInfo = responseBuilder.objectNode();
-            folderInfo.put("name", ProjectUtils.getInformation(project).getDisplayName());
-            folderInfo.put("uri", "file://" + project.getProjectDirectory().getPath());
+            folderInfo.put("name", projectData.displayName);
+            folderInfo.put("uri", "file://" + projectData.path);
             folders.add(folderInfo);
         }
         
