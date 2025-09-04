@@ -248,7 +248,7 @@ public class NetBeansMCPHandler {
                 // Core Claude Code tools
                 case "openFile":
                     OpenFileParams openFileParams = mapper.convertValue(arguments, OpenFileParams.class);
-                    return handleOpenFile(openFileParams.getPath(), 
+                    return handleOpenFile(openFileParams.getFilePath(), 
                                         openFileParams.getPreview() != null ? openFileParams.getPreview() : false);
                     
                 case "getWorkspaceFolders":

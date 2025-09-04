@@ -7,5 +7,5 @@
       "description": "Optional URI of specific file to get diagnostics for"
     }
   },
-  "required": ["uri"]
+  "required": []
 }

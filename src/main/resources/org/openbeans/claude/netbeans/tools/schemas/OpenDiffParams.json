@@ -19,5 +19,5 @@
       "description": "Name for the diff tab"
     }
   },
-  "required": []
+  "required": ["tab_name"]
 }

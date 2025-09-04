@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
-    "path": {
+    "filePath": {
       "type": "string",
       "description": "Path to the file to open"
     },
@@ -11,5 +11,5 @@
       "description": "Whether to open in preview mode"
     }
   },
-  "required": ["path", "preview"]
+  "required": ["filePath"]
 }
