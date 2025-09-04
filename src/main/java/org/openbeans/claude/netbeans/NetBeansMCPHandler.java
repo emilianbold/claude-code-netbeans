@@ -36,6 +36,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
+import java.io.FileNotFoundException;
 import org.netbeans.api.project.ui.OpenProjects;
 import org.netbeans.api.diff.Diff;
 import org.netbeans.api.diff.DiffView;
@@ -50,6 +51,7 @@ import org.netbeans.editor.Annotations;
 import org.netbeans.editor.AnnotationDesc;
 import org.openbeans.claude.netbeans.tools.CloseAllDiffTabs;
 import org.openbeans.claude.netbeans.tools.params.*;
+import org.openide.loaders.DataObjectNotFoundException;
 
 /**
  * Handles Model Context Protocol messages and provides NetBeans IDE capabilities
@@ -839,8 +841,7 @@ public class NetBeansMCPHandler {
     /**
      * Saves a document to disk.
      */
-    private JsonNode handleSaveDocument(String filePath) {
-        try {
+    private JsonNode handleSaveDocument(String filePath) throws FileNotFoundException, DataObjectNotFoundException, IOException {
             // Security check: Only allow saving files within open project directories
             if (!isPathWithinOpenProjects(filePath)) {
                 throw new SecurityException("File save denied: Path is not within any open project directory: " + filePath);
@@ -849,40 +850,28 @@ public class NetBeansMCPHandler {
             File file = new File(filePath);
             FileObject fileObject = FileUtil.toFileObject(file);
             
-            if (fileObject != null) {
-                try {
-                    DataObject dataObject = DataObject.find(fileObject);
-                    if (dataObject != null) {
-                        EditorCookie editorCookie = dataObject.getLookup().lookup(EditorCookie.class);
-                        
-                        if (editorCookie != null) {
-                            // Save the document
-                            editorCookie.saveDocument();
-                            
-                            ObjectNode result = responseBuilder.objectNode();
-                            result.put("filePath", filePath);
-                            result.put("saved", true);
-                            result.put("message", "Document saved successfully");
-                            
-                            return responseBuilder.createToolResponse(result);
-                        } else {
-                            return responseBuilder.createToolResponse("File is not editable or not currently managed by an editor");
-                        }
-                    } else {
-                        return responseBuilder.createToolResponse("File is not managed by NetBeans");
-                    }
-                } catch (Exception e) {
-                    LOGGER.log(Level.WARNING, "Error saving document: " + filePath, e);
-                    return responseBuilder.createToolResponse("Error saving document: " + e.getMessage());
-                }
-            } else {
-                return responseBuilder.createToolResponse("File not found: " + filePath);
+            if (fileObject == null) {
+                throw new FileNotFoundException(filePath);
             }
-            
-        } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Error in saveDocument: " + filePath, e);
-            return responseBuilder.createToolResponse("Error saving document: " + e.getMessage());
-        }
+            DataObject dataObject = DataObject.find(fileObject);
+            if (dataObject == null) {
+                // not really possible as find would throw DataObjectNotFoundException
+                throw new NullPointerException("dataObject");
+            }
+            EditorCookie editorCookie = dataObject.getLookup().lookup(EditorCookie.class);
+
+            if (editorCookie == null) {
+                throw new IllegalStateException("File is not editable or not currently managed by an editor");
+            }
+            // Save the document
+            editorCookie.saveDocument();
+
+            ObjectNode result = responseBuilder.objectNode();
+            result.put("filePath", filePath);
+            result.put("saved", true);
+            result.put("message", "Document saved successfully");
+
+            return responseBuilder.createToolResponse(result);
     }
     
     /**
@@ -1151,11 +1140,6 @@ public class NetBeansMCPHandler {
         
         return tool;
     }
-    
-    private ObjectNode objectNode() {
-        return responseBuilder.objectNode();
-    }
-    
     
     public void setWebSocketSession(Session session) {
         this.webSocketSession = session;
