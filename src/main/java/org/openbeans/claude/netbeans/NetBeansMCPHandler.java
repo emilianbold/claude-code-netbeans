@@ -49,6 +49,7 @@ import java.io.IOException;
 import org.netbeans.editor.Annotations;
 import org.netbeans.editor.AnnotationDesc;
 import org.openbeans.claude.netbeans.tools.CloseAllDiffTabs;
+import org.openbeans.claude.netbeans.tools.OpenFile;
 import org.openbeans.claude.netbeans.tools.SaveDocument;
 import org.openbeans.claude.netbeans.tools.params.*;
 
@@ -94,11 +95,13 @@ public class NetBeansMCPHandler {
     private JTextComponent currentTextComponent;
     
     private final CloseAllDiffTabs closeAllDiffTabsTool;
+    private final OpenFile openFileTool;
     private final SaveDocument saveDocument;
 
     public NetBeansMCPHandler() {
         this.responseBuilder = new MCPResponseBuilder(objectMapper);
         this.closeAllDiffTabsTool = new CloseAllDiffTabs();
+        this.openFileTool = new OpenFile();
         this.saveDocument = new SaveDocument();
     }
     
@@ -250,9 +253,7 @@ public class NetBeansMCPHandler {
             switch (toolName) {
                 // Core Claude Code tools
                 case "openFile":
-                    OpenFileParams openFileParams = mapper.convertValue(arguments, OpenFileParams.class);
-                    return handleOpenFile(openFileParams.getFilePath(), 
-                                        openFileParams.getPreview() != null ? openFileParams.getPreview() : false);
+                    return this.openFileTool.run(this.openFileTool.parseArguments(arguments), responseBuilder);
                     
                 case "getWorkspaceFolders":
                     return handleGetWorkspaceFolders();
@@ -488,38 +489,6 @@ public class NetBeansMCPHandler {
     }
     
     // Claude Code specific tool implementations
-    
-    private JsonNode handleOpenFile(String filePath, boolean preview) {
-        try {
-            // Security check: Only allow opening files within open project directories
-            if (!NbUtils.isPathWithinOpenProjects(filePath)) {
-                throw new SecurityException("File open denied: Path is not within any open project directory: " + filePath);
-            }
-            
-            File file = new File(filePath);
-            if (!file.exists()) {
-                throw new IllegalArgumentException("File does not exist: " + filePath);
-            }
-            
-            FileObject fileObject = FileUtil.toFileObject(file);
-            if (fileObject != null) {
-                DataObject dataObject = DataObject.find(fileObject);
-                EditorCookie editorCookie = dataObject.getLookup().lookup(EditorCookie.class);
-                
-                if (editorCookie != null) {
-                    // Open the file in NetBeans editor
-                    editorCookie.open();
-                    
-                    return responseBuilder.createToolResponse("File opened successfully: " + filePath);
-                }
-            }
-            
-            throw new RuntimeException("Failed to open file in editor");
-            
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to open file: " + e.getMessage(), e);
-        }
-    }
     
     private JsonNode handleGetWorkspaceFolders() {
         ArrayNode folders = responseBuilder.arrayNode();
