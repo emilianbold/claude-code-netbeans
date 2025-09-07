@@ -49,6 +49,7 @@ import java.io.IOException;
 import org.netbeans.editor.Annotations;
 import org.netbeans.editor.AnnotationDesc;
 import org.openbeans.claude.netbeans.tools.CloseAllDiffTabs;
+import org.openbeans.claude.netbeans.tools.GetWorkspaceFolders;
 import org.openbeans.claude.netbeans.tools.OpenFile;
 import org.openbeans.claude.netbeans.tools.SaveDocument;
 import org.openbeans.claude.netbeans.tools.params.*;
@@ -95,12 +96,14 @@ public class NetBeansMCPHandler {
     private JTextComponent currentTextComponent;
     
     private final CloseAllDiffTabs closeAllDiffTabsTool;
+    private final GetWorkspaceFolders getWorkspaceFoldersTool;
     private final OpenFile openFileTool;
     private final SaveDocument saveDocument;
 
     public NetBeansMCPHandler() {
         this.responseBuilder = new MCPResponseBuilder(objectMapper);
         this.closeAllDiffTabsTool = new CloseAllDiffTabs();
+        this.getWorkspaceFoldersTool = new GetWorkspaceFolders();
         this.openFileTool = new OpenFile();
         this.saveDocument = new SaveDocument();
     }
@@ -256,7 +259,7 @@ public class NetBeansMCPHandler {
                     return this.openFileTool.run(this.openFileTool.parseArguments(arguments), responseBuilder);
                     
                 case "getWorkspaceFolders":
-                    return handleGetWorkspaceFolders();
+                    return this.getWorkspaceFoldersTool.run(this.getWorkspaceFoldersTool.parseArguments(arguments), responseBuilder);
                     
                 case "getOpenEditors":
                     return handleGetOpenEditors();
@@ -489,23 +492,6 @@ public class NetBeansMCPHandler {
     }
     
     // Claude Code specific tool implementations
-    
-    private JsonNode handleGetWorkspaceFolders() {
-        ArrayNode folders = responseBuilder.arrayNode();
-        
-        // Get project data using existing method
-        List<ProjectData> projectDataList = getOpenProjectsData();
-        
-        // Build MCP response from the data
-        for (ProjectData projectData : projectDataList) {
-            ObjectNode folderInfo = responseBuilder.objectNode();
-            folderInfo.put("name", projectData.displayName);
-            folderInfo.put("uri", "file://" + projectData.path);
-            folders.add(folderInfo);
-        }
-        
-        return responseBuilder.createToolResponse(folders);
-    }
     
     private JsonNode handleGetOpenEditors() {
         return handleGetOpenDocuments(); // Reuse existing implementation
