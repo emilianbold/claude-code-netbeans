@@ -55,6 +55,7 @@ import org.openbeans.claude.netbeans.tools.GetCurrentSelection;
 import org.openbeans.claude.netbeans.tools.GetDiagnostics;
 import org.openbeans.claude.netbeans.tools.GetOpenEditors;
 import org.openbeans.claude.netbeans.tools.GetWorkspaceFolders;
+import org.openbeans.claude.netbeans.tools.OpenDiff;
 import org.openbeans.claude.netbeans.tools.OpenFile;
 import org.openbeans.claude.netbeans.tools.SaveDocument;
 import org.openbeans.claude.netbeans.tools.params.*;
@@ -83,6 +84,7 @@ public class NetBeansMCPHandler {
     private final GetDiagnostics getDiagnosticsTool;
     private final GetOpenEditors getOpenEditorsTool;
     private final GetWorkspaceFolders getWorkspaceFoldersTool;
+    private final OpenDiff openDiffTool;
     private final OpenFile openFileTool;
     private final SaveDocument saveDocument;
 
@@ -95,6 +97,7 @@ public class NetBeansMCPHandler {
         this.getDiagnosticsTool = new GetDiagnostics();
         this.getOpenEditorsTool = new GetOpenEditors();
         this.getWorkspaceFoldersTool = new GetWorkspaceFolders();
+        this.openDiffTool = new OpenDiff();
         this.openFileTool = new OpenFile();
         this.saveDocument = new SaveDocument();
     }
@@ -274,12 +277,7 @@ public class NetBeansMCPHandler {
                     return this.closeAllDiffTabsTool.run(this.closeAllDiffTabsTool.parseArguments(arguments), responseBuilder);
                     
                 case "openDiff":
-                    OpenDiffParams diffParams = mapper.convertValue(arguments, OpenDiffParams.class);
-                    return handleOpenDiff(
-                        diffParams.getOldFilePath(), 
-                        diffParams.getNewFilePath(), 
-                        diffParams.getNewFileContents(), 
-                        diffParams.getTabName());
+                    return this.openDiffTool.run(this.openDiffTool.parseArguments(arguments), responseBuilder);
                     
                 default:
                     throw new IllegalArgumentException("Unknown tool: " + toolName);
