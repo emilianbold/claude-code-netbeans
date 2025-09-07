@@ -4,11 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.annotation.JsonInclude;
 import org.eclipse.jetty.websocket.api.Session;
 import org.netbeans.api.project.Project;
 import org.netbeans.api.project.ProjectUtils;
-import org.netbeans.api.project.FileOwnerQuery;
 import org.openide.cookies.EditorCookie;
 import org.openide.filesystems.FileObject;
 import org.openide.filesystems.FileUtil;
@@ -37,17 +35,7 @@ import java.util.logging.Logger;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import org.netbeans.api.project.ui.OpenProjects;
-import org.netbeans.api.diff.Diff;
-import org.netbeans.api.diff.DiffView;
-import org.netbeans.api.diff.StreamSource;
-import org.netbeans.api.diff.Difference;
-import org.openide.util.Lookup;
-import java.io.StringReader;
-import java.io.Reader;
-import java.io.Writer;
 import java.io.IOException;
-import org.netbeans.editor.Annotations;
-import org.netbeans.editor.AnnotationDesc;
 import org.openbeans.claude.netbeans.tools.CheckDocumentDirty;
 import org.openbeans.claude.netbeans.tools.CloseAllDiffTabs;
 import org.openbeans.claude.netbeans.tools.CloseTab;
@@ -58,7 +46,6 @@ import org.openbeans.claude.netbeans.tools.GetWorkspaceFolders;
 import org.openbeans.claude.netbeans.tools.OpenDiff;
 import org.openbeans.claude.netbeans.tools.OpenFile;
 import org.openbeans.claude.netbeans.tools.SaveDocument;
-import org.openbeans.claude.netbeans.tools.params.*;
 
 /**
  * Handles Model Context Protocol messages and provides NetBeans IDE capabilities
@@ -350,6 +337,7 @@ public class NetBeansMCPHandler {
         
         if (uri.startsWith("project://")) {
             String projectPath = uri.substring("project://".length());
+            //XXX: This is probably doing the wrong thing
             return getProjectInfo(projectPath);
         }
         
@@ -386,77 +374,7 @@ public class NetBeansMCPHandler {
         return responseBuilder.createToolResponse(content);
     }
     
-    private JsonNode handleGetOpenProjects() {
-        ArrayNode projects = responseBuilder.arrayNode();
-        
-        // Get project data from NetBeans
-        List<ProjectData> projectDataList = getOpenProjectsData();
-        
-        // Build MCP response from the data
-        for (ProjectData projectData : projectDataList) {
-            ObjectNode projectInfo = responseBuilder.objectNode();
-            projectInfo.put("name", projectData.displayName);
-            projectInfo.put("path", projectData.path);
-            projects.add(projectInfo);
-        }
-        
-        return responseBuilder.createToolResponse(projects);
-    }
-    
-    private JsonNode handleGetProjectFiles(String projectPath) {
-        FileObject projectDir = FileUtil.toFileObject(new File(projectPath));
-        if (projectDir == null) {
-            throw new IllegalArgumentException("Project not found: " + projectPath);
-        }
-        
-        ArrayNode files = responseBuilder.arrayNode();
-        collectProjectFiles(projectDir, files, "");
-        
-        return responseBuilder.createToolResponse(files);
-    }
-    
-    
-    private JsonNode handleGetDocumentContent(String filePath) {
-        try {
-            FileObject fileObject = FileUtil.toFileObject(new File(filePath));
-            if (fileObject != null) {
-                DataObject dataObject = DataObject.find(fileObject);
-                EditorCookie editorCookie = dataObject.getLookup().lookup(EditorCookie.class);
-                
-                if (editorCookie != null) {
-                    Document doc = editorCookie.getDocument();
-                    if (doc != null) {
-                        String content = doc.getText(0, doc.getLength());
-                        return responseBuilder.createToolResponse(content);
-                    }
-                }
-            }
-            
-            // Fallback to file reading
-            return handleReadFile(filePath);
-            
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to get document content: " + e.getMessage(), e);
-        }
-    }
-    
     // Helper methods
-    
-    private void collectProjectFiles(FileObject dir, ArrayNode files, String relativePath) {
-        for (FileObject child : dir.getChildren()) {
-            String childPath = relativePath.isEmpty() ? child.getName() : relativePath + "/" + child.getName();
-            
-            ObjectNode fileInfo = responseBuilder.objectNode();
-            fileInfo.put("name", child.getName());
-            fileInfo.put("path", childPath);
-            fileInfo.put("isFolder", child.isFolder());
-            files.add(fileInfo);
-            
-            if (child.isFolder()) {
-                collectProjectFiles(child, files, childPath);
-            }
-        }
-    }
     
     private JsonNode getProjectInfo(String projectPath) {
         FileObject projectDir = FileUtil.toFileObject(new File(projectPath));
@@ -469,8 +387,7 @@ public class NetBeansMCPHandler {
         projectInfo.put("name", projectDir.getName());
         
         ArrayNode files = responseBuilder.arrayNode();
-        collectProjectFiles(projectDir, files, "");
-        projectInfo.set("files", files);
+        // projectInfo.set("files", files);
         
         return projectInfo;
     }
