@@ -49,6 +49,7 @@ import java.io.IOException;
 import org.netbeans.editor.Annotations;
 import org.netbeans.editor.AnnotationDesc;
 import org.openbeans.claude.netbeans.tools.CloseAllDiffTabs;
+import org.openbeans.claude.netbeans.tools.GetOpenEditors;
 import org.openbeans.claude.netbeans.tools.GetWorkspaceFolders;
 import org.openbeans.claude.netbeans.tools.OpenFile;
 import org.openbeans.claude.netbeans.tools.SaveDocument;
@@ -96,6 +97,7 @@ public class NetBeansMCPHandler {
     private JTextComponent currentTextComponent;
     
     private final CloseAllDiffTabs closeAllDiffTabsTool;
+    private final GetOpenEditors getOpenEditorsTool;
     private final GetWorkspaceFolders getWorkspaceFoldersTool;
     private final OpenFile openFileTool;
     private final SaveDocument saveDocument;
@@ -103,6 +105,7 @@ public class NetBeansMCPHandler {
     public NetBeansMCPHandler() {
         this.responseBuilder = new MCPResponseBuilder(objectMapper);
         this.closeAllDiffTabsTool = new CloseAllDiffTabs();
+        this.getOpenEditorsTool = new GetOpenEditors();
         this.getWorkspaceFoldersTool = new GetWorkspaceFolders();
         this.openFileTool = new OpenFile();
         this.saveDocument = new SaveDocument();
@@ -262,7 +265,7 @@ public class NetBeansMCPHandler {
                     return this.getWorkspaceFoldersTool.run(this.getWorkspaceFoldersTool.parseArguments(arguments), responseBuilder);
                     
                 case "getOpenEditors":
-                    return handleGetOpenEditors();
+                    return this.getOpenEditorsTool.run(this.getOpenEditorsTool.parseArguments(arguments), responseBuilder);
                     
                 case "getCurrentSelection":
                     return handleGetCurrentSelection();
@@ -429,43 +432,6 @@ public class NetBeansMCPHandler {
         return responseBuilder.createToolResponse(files);
     }
     
-    private JsonNode handleGetOpenDocuments() {
-        ArrayNode documents = responseBuilder.arrayNode();
-        
-        try {
-            // Use TopComponent registry to get open editor nodes
-            Node[] nodes = TopComponent.getRegistry().getCurrentNodes();
-            for (Node node : nodes) {
-                EditorCookie editorCookie = node.getLookup().lookup(EditorCookie.class);
-                if (editorCookie != null) {
-                    DataObject dataObject = node.getLookup().lookup(DataObject.class);
-                    if (dataObject != null) {
-                        FileObject fileObject = dataObject.getPrimaryFile();
-                        if (fileObject != null) {
-                            ObjectNode docInfo = responseBuilder.objectNode();
-                            docInfo.put("name", fileObject.getName());
-                            docInfo.put("path", fileObject.getPath());
-                            docInfo.put("extension", fileObject.getExt());
-                            docInfo.put("mimeType", fileObject.getMIMEType());
-                            
-                            // Get the project owner using FileOwnerQuery
-                            Project owner = FileOwnerQuery.getOwner(fileObject);
-                            if (owner != null) {
-                                docInfo.put("projectName", ProjectUtils.getInformation(owner).getDisplayName());
-                                docInfo.put("projectPath", owner.getProjectDirectory().getPath());
-                            }
-                            
-                            documents.add(docInfo);
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Error getting open documents", e);
-        }
-        
-        return responseBuilder.createToolResponse(documents);
-    }
     
     private JsonNode handleGetDocumentContent(String filePath) {
         try {
@@ -492,10 +458,6 @@ public class NetBeansMCPHandler {
     }
     
     // Claude Code specific tool implementations
-    
-    private JsonNode handleGetOpenEditors() {
-        return handleGetOpenDocuments(); // Reuse existing implementation
-    }
     
     private JsonNode handleGetCurrentSelection() {
         try {
