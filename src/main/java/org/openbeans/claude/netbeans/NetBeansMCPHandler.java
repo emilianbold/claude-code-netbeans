@@ -48,6 +48,7 @@ import java.io.Writer;
 import java.io.IOException;
 import org.netbeans.editor.Annotations;
 import org.netbeans.editor.AnnotationDesc;
+import org.openbeans.claude.netbeans.tools.CheckDocumentDirty;
 import org.openbeans.claude.netbeans.tools.CloseAllDiffTabs;
 import org.openbeans.claude.netbeans.tools.CloseTab;
 import org.openbeans.claude.netbeans.tools.GetCurrentSelection;
@@ -98,6 +99,7 @@ public class NetBeansMCPHandler {
     private PropertyChangeListener topComponentListener;
     private JTextComponent currentTextComponent;
     
+    private final CheckDocumentDirty checkDocumentDirtyTool;
     private final CloseAllDiffTabs closeAllDiffTabsTool;
     private final CloseTab closeTabTool;
     private final GetCurrentSelection getCurrentSelectionTool;
@@ -108,6 +110,7 @@ public class NetBeansMCPHandler {
 
     public NetBeansMCPHandler() {
         this.responseBuilder = new MCPResponseBuilder(objectMapper);
+        this.checkDocumentDirtyTool = new CheckDocumentDirty();
         this.closeAllDiffTabsTool = new CloseAllDiffTabs();
         this.closeTabTool = new CloseTab();
         this.getCurrentSelectionTool = new GetCurrentSelection();
@@ -284,8 +287,7 @@ public class NetBeansMCPHandler {
                     return handleGetDiagnostics(diagnosticsParams.getUri());
                     
                 case "checkDocumentDirty":
-                    CheckDocumentDirtyParams dirtyParams = mapper.convertValue(arguments, CheckDocumentDirtyParams.class);
-                    return handleCheckDocumentDirty(dirtyParams.getFilePath());
+                    return this.checkDocumentDirtyTool.run(this.checkDocumentDirtyTool.parseArguments(arguments), responseBuilder);
                     
                 case "saveDocument":
                     return this.saveDocument.run(this.saveDocument.parseArguments(arguments), responseBuilder);
@@ -643,56 +645,6 @@ public class NetBeansMCPHandler {
         return new DiagnosticData(message, severity, source, filePath, lineNumber, columnNumber, code);
     }
     
-    
-    /**
-     * Checks if a document has unsaved changes.
-     */
-    private JsonNode handleCheckDocumentDirty(String filePath) {
-        try {
-            // Security check: Only allow checking files within open project directories
-            if (!NbUtils.isPathWithinOpenProjects(filePath)) {
-                throw new SecurityException("File access denied: Path is not within any open project directory: " + filePath);
-            }
-            
-            File file = new File(filePath);
-            FileObject fileObject = FileUtil.toFileObject(file);
-            
-            if (fileObject != null) {
-                try {
-                    DataObject dataObject = DataObject.find(fileObject);
-                    if (dataObject != null) {
-                        boolean isDirty = dataObject.isModified();
-                        
-                        ObjectNode result = responseBuilder.objectNode();
-                        result.put("filePath", filePath);
-                        result.put("isDirty", isDirty);
-                        
-                        // Also check if the file is currently open in an editor
-                        EditorCookie editorCookie = dataObject.getLookup().lookup(EditorCookie.class);
-                        boolean isOpen = editorCookie != null && editorCookie.getOpenedPanes() != null && editorCookie.getOpenedPanes().length > 0;
-                        result.put("isOpen", isOpen);
-                        
-                        return responseBuilder.createToolResponse(result);
-                    }
-                } catch (Exception e) {
-                    LOGGER.log(Level.WARNING, "Error checking DataObject for file: " + filePath, e);
-                }
-            }
-            
-            // File not found or not a NetBeans-managed file
-            ObjectNode result = responseBuilder.objectNode();
-            result.put("filePath", filePath);
-            result.put("isDirty", false);
-            result.put("isOpen", false);
-            result.put("note", "File not found or not currently managed by NetBeans");
-            
-            return responseBuilder.createToolResponse(result);
-            
-        } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Error checking document dirty state: " + filePath, e);
-            return responseBuilder.createToolResponse("Error checking document dirty state: " + e.getMessage());
-        }
-    }
     
     /**
      * Opens a diff viewer comparing two files.
