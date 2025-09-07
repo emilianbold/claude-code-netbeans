@@ -49,6 +49,7 @@ import java.io.IOException;
 import org.netbeans.editor.Annotations;
 import org.netbeans.editor.AnnotationDesc;
 import org.openbeans.claude.netbeans.tools.CloseAllDiffTabs;
+import org.openbeans.claude.netbeans.tools.CloseTab;
 import org.openbeans.claude.netbeans.tools.GetCurrentSelection;
 import org.openbeans.claude.netbeans.tools.GetOpenEditors;
 import org.openbeans.claude.netbeans.tools.GetWorkspaceFolders;
@@ -98,6 +99,7 @@ public class NetBeansMCPHandler {
     private JTextComponent currentTextComponent;
     
     private final CloseAllDiffTabs closeAllDiffTabsTool;
+    private final CloseTab closeTabTool;
     private final GetCurrentSelection getCurrentSelectionTool;
     private final GetOpenEditors getOpenEditorsTool;
     private final GetWorkspaceFolders getWorkspaceFoldersTool;
@@ -107,6 +109,7 @@ public class NetBeansMCPHandler {
     public NetBeansMCPHandler() {
         this.responseBuilder = new MCPResponseBuilder(objectMapper);
         this.closeAllDiffTabsTool = new CloseAllDiffTabs();
+        this.closeTabTool = new CloseTab();
         this.getCurrentSelectionTool = new GetCurrentSelection();
         this.getOpenEditorsTool = new GetOpenEditors();
         this.getWorkspaceFoldersTool = new GetWorkspaceFolders();
@@ -274,8 +277,7 @@ public class NetBeansMCPHandler {
                     return this.getCurrentSelectionTool.run(this.getCurrentSelectionTool.parseArguments(arguments), responseBuilder);
                     
                 case "close_tab":
-                    CloseTabParams closeTabParams = mapper.convertValue(arguments, CloseTabParams.class);
-                    return handleCloseTab(closeTabParams.getTabName());
+                    return this.closeTabTool.run(this.closeTabTool.parseArguments(arguments), responseBuilder);
                     
                 case "getDiagnostics":
                     GetDiagnosticsParams diagnosticsParams = mapper.convertValue(arguments, GetDiagnosticsParams.class);
@@ -461,42 +463,6 @@ public class NetBeansMCPHandler {
     }
     
     // Claude Code specific tool implementations
-    
-    private JsonNode handleCloseTab(String tabName) {
-        try {
-            // Find the TopComponent by tab name
-            for (TopComponent tc : TopComponent.getRegistry().getOpened()) {
-                String displayName = tc.getDisplayName();
-                if (displayName != null && displayName.equals(tabName)) {
-                    // Close the tab
-                    tc.close();
-                    return responseBuilder.createToolResponse("Tab closed successfully: " + tabName);
-                }
-            }
-            
-            // If no exact match found, try to find by file name (without path)
-            for (TopComponent tc : TopComponent.getRegistry().getOpened()) {
-                Node[] nodes = tc.getActivatedNodes();
-                if (nodes != null && nodes.length > 0) {
-                    DataObject dataObject = nodes[0].getLookup().lookup(DataObject.class);
-                    if (dataObject != null) {
-                        String fileName = dataObject.getPrimaryFile().getName();
-                        if (fileName.equals(tabName) || (fileName + "." + dataObject.getPrimaryFile().getExt()).equals(tabName)) {
-                            tc.close();
-                            return responseBuilder.createToolResponse("Tab closed successfully: " + tabName);
-                        }
-                    }
-                }
-            }
-            
-            // If tab not found in open tabs
-            LOGGER.warning("Tab not found for close request: '" + tabName + "'");
-            return responseBuilder.createToolResponse("Tab not currently open: " + tabName);
-            
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to close tab: " + e.getMessage(), e);
-        }
-    }
     
     private JsonNode handleGetDiagnostics(String uri) {
         try {
