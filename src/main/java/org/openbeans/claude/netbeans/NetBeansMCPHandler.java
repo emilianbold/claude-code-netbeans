@@ -49,6 +49,7 @@ import java.io.IOException;
 import org.netbeans.editor.Annotations;
 import org.netbeans.editor.AnnotationDesc;
 import org.openbeans.claude.netbeans.tools.CloseAllDiffTabs;
+import org.openbeans.claude.netbeans.tools.GetCurrentSelection;
 import org.openbeans.claude.netbeans.tools.GetOpenEditors;
 import org.openbeans.claude.netbeans.tools.GetWorkspaceFolders;
 import org.openbeans.claude.netbeans.tools.OpenFile;
@@ -97,6 +98,7 @@ public class NetBeansMCPHandler {
     private JTextComponent currentTextComponent;
     
     private final CloseAllDiffTabs closeAllDiffTabsTool;
+    private final GetCurrentSelection getCurrentSelectionTool;
     private final GetOpenEditors getOpenEditorsTool;
     private final GetWorkspaceFolders getWorkspaceFoldersTool;
     private final OpenFile openFileTool;
@@ -105,6 +107,7 @@ public class NetBeansMCPHandler {
     public NetBeansMCPHandler() {
         this.responseBuilder = new MCPResponseBuilder(objectMapper);
         this.closeAllDiffTabsTool = new CloseAllDiffTabs();
+        this.getCurrentSelectionTool = new GetCurrentSelection();
         this.getOpenEditorsTool = new GetOpenEditors();
         this.getWorkspaceFoldersTool = new GetWorkspaceFolders();
         this.openFileTool = new OpenFile();
@@ -268,7 +271,7 @@ public class NetBeansMCPHandler {
                     return this.getOpenEditorsTool.run(this.getOpenEditorsTool.parseArguments(arguments), responseBuilder);
                     
                 case "getCurrentSelection":
-                    return handleGetCurrentSelection();
+                    return this.getCurrentSelectionTool.run(this.getCurrentSelectionTool.parseArguments(arguments), responseBuilder);
                     
                 case "close_tab":
                     CloseTabParams closeTabParams = mapper.convertValue(arguments, CloseTabParams.class);
@@ -458,36 +461,6 @@ public class NetBeansMCPHandler {
     }
     
     // Claude Code specific tool implementations
-    
-    private JsonNode handleGetCurrentSelection() {
-        try {
-            NbUtils.SelectionData selectionData = NbUtils.getCurrentSelectionData();
-            if (selectionData != null) {
-                return buildSelectionResponse(selectionData);
-            } else {
-                return responseBuilder.createToolResponse("");
-            }
-        } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Error getting current selection", e);
-            return responseBuilder.createToolResponse("");
-        }
-    }
-    
-    
-    /**
-     * Builds JSON response for selection data.
-     * 
-     * @param selectionData the selection data to convert to JSON response
-     * @return JSON response for the selection
-     */
-    private JsonNode buildSelectionResponse(NbUtils.SelectionData selectionData) {
-        if (selectionData.isEmpty) {
-            return responseBuilder.createToolResponse("");
-        }
-        
-        // Let Jackson automatically serialize the SelectionData object
-        return responseBuilder.createToolResponse(selectionData);
-    }
     
     private JsonNode handleCloseTab(String tabName) {
         try {
