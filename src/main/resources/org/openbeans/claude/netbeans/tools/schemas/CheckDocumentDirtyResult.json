@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "filePath": {
+      "type": "string",
+      "description": "Path to the file that was checked"
+    },
+    "isDirty": {
+      "type": "boolean",
+      "description": "Whether the document has unsaved changes"
+    },
+    "isOpen": {
+      "type": "boolean",
+      "description": "Whether the file is currently open in an editor"
+    },
+    "note": {
+      "type": "string",
+      "description": "Optional note about the file status"
+    }
+  },
+  "required": ["filePath", "isDirty", "isOpen"]
+}

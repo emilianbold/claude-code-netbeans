@@ -1,13 +1,13 @@
 package org.openbeans.claude.netbeans.tools;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.File;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.openbeans.claude.netbeans.MCPResponseBuilder;
 import org.openbeans.claude.netbeans.NbUtils;
 import org.openbeans.claude.netbeans.tools.params.CheckDocumentDirtyParams;
+import org.openbeans.claude.netbeans.tools.params.CheckDocumentDirtyResult;
 import org.openide.cookies.EditorCookie;
 import org.openide.filesystems.FileObject;
 import org.openide.filesystems.FileUtil;
@@ -53,16 +53,16 @@ public class CheckDocumentDirty implements Tool<CheckDocumentDirtyParams> {
                     DataObject dataObject = DataObject.find(fileObject);
                     if (dataObject != null) {
                         boolean isDirty = dataObject.isModified();
-                        
-                        ObjectNode result = responseBuilder.objectNode();
-                        result.put("filePath", filePath);
-                        result.put("isDirty", isDirty);
-                        
+
                         // Also check if the file is currently open in an editor
                         EditorCookie editorCookie = dataObject.getLookup().lookup(EditorCookie.class);
                         boolean isOpen = editorCookie != null && editorCookie.getOpenedPanes() != null && editorCookie.getOpenedPanes().length > 0;
-                        result.put("isOpen", isOpen);
-                        
+
+                        CheckDocumentDirtyResult result = new CheckDocumentDirtyResult();
+                        result.setFilePath(filePath);
+                        result.setIsDirty(isDirty);
+                        result.setIsOpen(isOpen);
+
                         return responseBuilder.createToolResponse(result);
                     }
                 } catch (Exception e) {
@@ -71,12 +71,12 @@ public class CheckDocumentDirty implements Tool<CheckDocumentDirtyParams> {
             }
             
             // File not found or not a NetBeans-managed file
-            ObjectNode result = responseBuilder.objectNode();
-            result.put("filePath", filePath);
-            result.put("isDirty", false);
-            result.put("isOpen", false);
-            result.put("note", "File not found or not currently managed by NetBeans");
-            
+            CheckDocumentDirtyResult result = new CheckDocumentDirtyResult();
+            result.setFilePath(filePath);
+            result.setIsDirty(false);
+            result.setIsOpen(false);
+            result.setNote("File not found or not currently managed by NetBeans");
+
             return responseBuilder.createToolResponse(result);
             
         } catch (Exception e) {
