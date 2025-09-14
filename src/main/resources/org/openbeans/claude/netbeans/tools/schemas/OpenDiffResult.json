@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "success": {
+      "type": "boolean",
+      "description": "Whether the diff viewer was opened successfully"
+    },
+    "tabName": {
+      "type": "string",
+      "description": "The name of the diff tab"
+    },
+    "oldFile": {
+      "type": "string",
+      "description": "Path to the old/left file in the diff"
+    },
+    "newFile": {
+      "type": "string",
+      "description": "Path to the new/right file in the diff"
+    },
+    "message": {
+      "type": "string",
+      "description": "Status message about the operation"
+    }
+  },
+  "required": ["success", "message"]
+}

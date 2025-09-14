@@ -19,6 +19,7 @@ import org.openbeans.claude.netbeans.EditorUtils;
 import org.openbeans.claude.netbeans.MCPResponseBuilder;
 import org.openbeans.claude.netbeans.NbUtils;
 import org.openbeans.claude.netbeans.tools.params.OpenDiffParams;
+import org.openbeans.claude.netbeans.tools.params.OpenDiffResult;
 import org.openide.util.Lookup;
 import org.openide.windows.TopComponent;
 
@@ -203,13 +204,13 @@ public class OpenDiff implements Tool<OpenDiffParams> {
                             LOGGER.log(Level.WARNING, "Diff component is not a TopComponent: {0}", component.getClass());
                         }
                         
-                        ObjectNode result = responseBuilder.objectNode();
-                        result.put("success", true);
-                        result.put("tabName", diffTabName);
-                        result.put("oldFile", finalOldFilePath);
-                        result.put("newFile", finalNewFilePath);
-                        result.put("message", "Diff viewer opened successfully");
-                        
+                        OpenDiffResult result = new OpenDiffResult();
+                        result.setSuccess(true);
+                        result.setTabName(diffTabName);
+                        result.setOldFile(finalOldFilePath);
+                        result.setNewFile(finalNewFilePath);
+                        result.setMessage("Diff viewer opened successfully");
+
                         return responseBuilder.createToolResponse(result);
                     } else {
                         LOGGER.warning("Failed to create diff view - diffView is null");
