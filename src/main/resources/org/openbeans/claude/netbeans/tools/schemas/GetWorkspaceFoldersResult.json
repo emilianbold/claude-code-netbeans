@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "folders": {
+      "type": "array",
+      "description": "List of workspace folders (open projects)",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The display name of the project/folder"
+          },
+          "uri": {
+            "type": "string",
+            "description": "The URI path to the project directory"
+          }
+        },
+        "required": ["name", "uri"]
+      }
+    }
+  },
+  "required": ["folders"]
+}

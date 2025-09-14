@@ -1,8 +1,6 @@
 package org.openbeans.claude.netbeans.tools;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Logger;
@@ -11,6 +9,8 @@ import org.netbeans.api.project.ProjectUtils;
 import org.netbeans.api.project.ui.OpenProjects;
 import org.openbeans.claude.netbeans.MCPResponseBuilder;
 import org.openbeans.claude.netbeans.tools.params.GetWorkspaceFoldersParams;
+import org.openbeans.claude.netbeans.tools.params.GetWorkspaceFoldersResult;
+import org.openbeans.claude.netbeans.tools.params.Folder;
 
 /**
  * Tool to get list of workspace folders (open projects).
@@ -65,19 +65,21 @@ public class GetWorkspaceFolders implements Tool<GetWorkspaceFoldersParams> {
     
     @Override
     public JsonNode run(GetWorkspaceFoldersParams params, MCPResponseBuilder responseBuilder) throws Exception {
-        ArrayNode folders = responseBuilder.arrayNode();
-        
+        GetWorkspaceFoldersResult result = new GetWorkspaceFoldersResult();
+        List<Folder> folders = new ArrayList<>();
+
         // Get project data using existing method
         List<ProjectData> projectDataList = getOpenProjectsData();
-        
+
         // Build MCP response from the data
         for (ProjectData projectData : projectDataList) {
-            ObjectNode folderInfo = responseBuilder.objectNode();
-            folderInfo.put("name", projectData.displayName);
-            folderInfo.put("uri", "file://" + projectData.path);
-            folders.add(folderInfo);
+            Folder folder = new Folder();
+            folder.setName(projectData.displayName);
+            folder.setUri("file://" + projectData.path);
+            folders.add(folder);
         }
-        
-        return responseBuilder.createToolResponse(folders);
+
+        result.setFolders(folders);
+        return responseBuilder.createToolResponse(result);
     }
 }
