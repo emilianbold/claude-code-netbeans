@@ -1,8 +1,6 @@
 package org.openbeans.claude.netbeans.tools;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.File;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -11,6 +9,10 @@ import org.netbeans.api.project.Project;
 import org.netbeans.api.project.ProjectUtils;
 import org.openbeans.claude.netbeans.MCPResponseBuilder;
 import org.openbeans.claude.netbeans.tools.params.GetOpenEditorsParams;
+import org.openbeans.claude.netbeans.tools.params.GetOpenEditorsResult;
+import org.openbeans.claude.netbeans.tools.params.Editor;
+import java.util.ArrayList;
+import java.util.List;
 import org.openide.cookies.EditorCookie;
 import org.openide.filesystems.FileObject;
 import org.openide.filesystems.FileUtil;
@@ -42,8 +44,9 @@ public class GetOpenEditors implements Tool<GetOpenEditorsParams> {
     
     @Override
     public JsonNode run(GetOpenEditorsParams params, MCPResponseBuilder responseBuilder) throws Exception {
-        ArrayNode documents = responseBuilder.arrayNode();
-        
+        GetOpenEditorsResult result = new GetOpenEditorsResult();
+        List<Editor> editors = new ArrayList<>();
+
         try {
             // Use TopComponent registry to get open editor nodes
             Node[] nodes = TopComponent.getRegistry().getCurrentNodes();
@@ -54,20 +57,20 @@ public class GetOpenEditors implements Tool<GetOpenEditorsParams> {
                     if (dataObject != null) {
                         FileObject fileObject = dataObject.getPrimaryFile();
                         if (fileObject != null) {
-                            ObjectNode docInfo = responseBuilder.objectNode();
-                            docInfo.put("name", fileObject.getName());
-                            docInfo.put("path", fileObject.getPath());
-                            docInfo.put("extension", fileObject.getExt());
-                            docInfo.put("mimeType", fileObject.getMIMEType());
-                            
+                            Editor editor = new Editor();
+                            editor.setName(fileObject.getName());
+                            editor.setPath(fileObject.getPath());
+                            editor.setExtension(fileObject.getExt());
+                            editor.setMimeType(fileObject.getMIMEType());
+
                             // Get the project owner using FileOwnerQuery
                             Project owner = FileOwnerQuery.getOwner(fileObject);
                             if (owner != null) {
-                                docInfo.put("projectName", ProjectUtils.getInformation(owner).getDisplayName());
-                                docInfo.put("projectPath", owner.getProjectDirectory().getPath());
+                                editor.setProjectName(ProjectUtils.getInformation(owner).getDisplayName());
+                                editor.setProjectPath(owner.getProjectDirectory().getPath());
                             }
-                            
-                            documents.add(docInfo);
+
+                            editors.add(editor);
                         }
                     }
                 }
@@ -75,7 +78,8 @@ public class GetOpenEditors implements Tool<GetOpenEditorsParams> {
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Error getting open documents", e);
         }
-        
-        return responseBuilder.createToolResponse(documents);
+
+        result.setEditors(editors);
+        return responseBuilder.createToolResponse(result);
     }
 }

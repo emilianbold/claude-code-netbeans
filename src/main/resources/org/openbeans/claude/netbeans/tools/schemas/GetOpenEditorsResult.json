@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "editors": {
+      "type": "array",
+      "description": "List of currently open editors",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The file name without extension"
+          },
+          "path": {
+            "type": "string",
+            "description": "The full file path"
+          },
+          "extension": {
+            "type": "string",
+            "description": "The file extension"
+          },
+          "mimeType": {
+            "type": "string",
+            "description": "The MIME type of the file"
+          },
+          "projectName": {
+            "type": "string",
+            "description": "The name of the project containing this file"
+          },
+          "projectPath": {
+            "type": "string",
+            "description": "The path to the project directory"
+          }
+        },
+        "required": ["name", "path", "extension", "mimeType"]
+      }
+    }
+  },
+  "required": ["editors"]
+}
