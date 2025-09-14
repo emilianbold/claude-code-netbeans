@@ -8,6 +8,7 @@ import java.io.IOException;
 import org.openbeans.claude.netbeans.MCPResponseBuilder;
 import org.openbeans.claude.netbeans.NbUtils;
 import org.openbeans.claude.netbeans.tools.params.SaveDocumentParams;
+import org.openbeans.claude.netbeans.tools.params.SaveDocumentResult;
 import org.openide.cookies.EditorCookie;
 import org.openide.filesystems.FileObject;
 import org.openide.filesystems.FileUtil;
@@ -62,10 +63,10 @@ public class SaveDocument implements Tool<SaveDocumentParams> {
         // Save the document
         editorCookie.saveDocument();
 
-        ObjectNode result = responseBuilder.objectNode();
-        result.put("filePath", filePath);
-        result.put("saved", true);
-        result.put("message", "Document saved successfully");
+        SaveDocumentResult result = new SaveDocumentResult();
+        result.setFilePath(filePath);
+        result.setSaved(true);
+        result.setMessage("Document saved successfully");
 
         return responseBuilder.createToolResponse(result);
     }

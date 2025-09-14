@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "filePath": {
+      "type": "string",
+      "description": "Path to the file that was saved"
+    },
+    "saved": {
+      "type": "boolean",
+      "description": "Whether the document was saved successfully"
+    },
+    "message": {
+      "type": "string",
+      "description": "Status message about the save operation"
+    }
+  },
+  "required": ["filePath", "saved", "message"]
+}
