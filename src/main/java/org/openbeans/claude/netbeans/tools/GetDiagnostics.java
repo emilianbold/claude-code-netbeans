@@ -1,7 +1,6 @@
 package org.openbeans.claude.netbeans.tools;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.JsonNode;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
@@ -10,7 +9,6 @@ import java.util.logging.Logger;
 import javax.swing.text.Document;
 import org.netbeans.editor.AnnotationDesc;
 import org.netbeans.editor.Annotations;
-import org.openbeans.claude.netbeans.MCPResponseBuilder;
 import org.openbeans.claude.netbeans.NbUtils;
 import org.openbeans.claude.netbeans.tools.params.GetDiagnosticsParams;
 import org.openide.cookies.EditorCookie;
@@ -23,7 +21,7 @@ import org.openide.windows.TopComponent;
 /**
  * Tool to get diagnostic information (errors, warnings) for files.
  */
-public class GetDiagnostics implements Tool<GetDiagnosticsParams> {
+public class GetDiagnostics implements Tool<GetDiagnosticsParams, List<GetDiagnostics.DiagnosticData>> {
     
     private static final Logger LOGGER = Logger.getLogger(GetDiagnostics.class.getName());
     
@@ -66,29 +64,29 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams> {
     public Class<GetDiagnosticsParams> getParameterClass() {
         return GetDiagnosticsParams.class;
     }
-    
+
     @Override
-    public JsonNode run(GetDiagnosticsParams params, MCPResponseBuilder responseBuilder) throws Exception {
+    public List<GetDiagnostics.DiagnosticData> run(GetDiagnosticsParams params) throws Exception {
         String uri = params.getUri();
         
         try {
             if (uri != null) {
                 // Get diagnostics for a specific file
-                return getDiagnosticsForFile(uri, responseBuilder);
+                return getDiagnosticsForFile(uri);
             } else {
                 // Get diagnostics for all open files
-                return getDiagnosticsForAllFiles(responseBuilder);
+                return getDiagnosticsForAllFiles();
             }
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Failed to get diagnostics", e);
-            return responseBuilder.createToolResponse("Failed to get diagnostics: " + e.getMessage());
+            return new ArrayList<>();
         }
     }
     
     /**
      * Extracts diagnostic information from NetBeans annotations for a specific file.
      */
-    private JsonNode getDiagnosticsForFile(String uri, MCPResponseBuilder responseBuilder) {
+    private List<GetDiagnostics.DiagnosticData> getDiagnosticsForFile(String uri) {
         try {
             // Convert URI to file path
             String filePath = uri.startsWith("file://") ? uri.substring(7) : uri;
@@ -98,21 +96,21 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams> {
                 throw new SecurityException("File access denied: Path is not within any open project directory: " + filePath);
             }
             
-            List<DiagnosticData> diagnostics = extractDiagnosticsFromFile(filePath);
-            return responseBuilder.createToolResponse(diagnostics);
+            List<GetDiagnostics.DiagnosticData> diagnostics = extractDiagnosticsFromFile(filePath);
+            return diagnostics;
             
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Failed to get diagnostics for file: " + uri, e);
-            return responseBuilder.createToolResponse("Failed to get diagnostics for file: " + e.getMessage());
+            return new ArrayList<>();
         }
     }
     
     /**
      * Gets diagnostics for all currently open files.
      */
-    private JsonNode getDiagnosticsForAllFiles(MCPResponseBuilder responseBuilder) {
+    private List<GetDiagnostics.DiagnosticData> getDiagnosticsForAllFiles() {
         try {
-            List<DiagnosticData> allDiagnostics = new ArrayList<>();
+            List<GetDiagnostics.DiagnosticData> allDiagnostics = new ArrayList<>();
             
             // Go through all open TopComponents (editor tabs)
             for (TopComponent tc : TopComponent.getRegistry().getOpened()) {
@@ -124,7 +122,7 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams> {
                         if (fileObject != null) {
                             File file = FileUtil.toFile(fileObject);
                             if (file != null) {
-                                List<DiagnosticData> fileDiagnostics = extractDiagnosticsFromFile(file.getAbsolutePath());
+                                List<GetDiagnostics.DiagnosticData> fileDiagnostics = extractDiagnosticsFromFile(file.getAbsolutePath());
                                 allDiagnostics.addAll(fileDiagnostics);
                             }
                         }
@@ -132,19 +130,19 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams> {
                 }
             }
             
-            return responseBuilder.createToolResponse(allDiagnostics);
+            return allDiagnostics;
             
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Failed to get diagnostics for all files", e);
-            return responseBuilder.createToolResponse("Failed to get diagnostics: " + e.getMessage());
+            return new ArrayList<>();
         }
     }
     
     /**
      * Extracts diagnostic information from a specific file using NetBeans editor annotations.
      */
-    private List<DiagnosticData> extractDiagnosticsFromFile(String filePath) {
-        List<DiagnosticData> diagnostics = new ArrayList<>();
+    private List<GetDiagnostics.DiagnosticData> extractDiagnosticsFromFile(String filePath) {
+        List<GetDiagnostics.DiagnosticData> diagnostics = new ArrayList<>();
         
         try {
             File file = new File(filePath);
@@ -246,6 +244,6 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams> {
             }
         }
         
-        return new DiagnosticData(message, severity, source, filePath, lineNumber, columnNumber, code);
+        return new GetDiagnostics.DiagnosticData(message, severity, source, filePath, lineNumber, columnNumber, code);
     }
 }

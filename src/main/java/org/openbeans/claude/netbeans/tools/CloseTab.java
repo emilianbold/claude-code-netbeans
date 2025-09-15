@@ -1,8 +1,6 @@
 package org.openbeans.claude.netbeans.tools;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import java.util.logging.Logger;
-import org.openbeans.claude.netbeans.MCPResponseBuilder;
 import org.openbeans.claude.netbeans.tools.params.CloseTabParams;
 import org.openide.loaders.DataObject;
 import org.openide.nodes.Node;
@@ -11,7 +9,7 @@ import org.openide.windows.TopComponent;
 /**
  * Tool to close an open editor tab.
  */
-public class CloseTab implements Tool<CloseTabParams> {
+public class CloseTab implements Tool<CloseTabParams, String> {
     
     private static final Logger LOGGER = Logger.getLogger(CloseTab.class.getName());
     
@@ -29,9 +27,10 @@ public class CloseTab implements Tool<CloseTabParams> {
     public Class<CloseTabParams> getParameterClass() {
         return CloseTabParams.class;
     }
-    
+
+
     @Override
-    public JsonNode run(CloseTabParams params, MCPResponseBuilder responseBuilder) throws Exception {
+    public String run(CloseTabParams params) throws Exception {
         String tabName = params.getTabName();
         
         try {
@@ -41,7 +40,7 @@ public class CloseTab implements Tool<CloseTabParams> {
                 if (displayName != null && displayName.equals(tabName)) {
                     // Close the tab
                     tc.close();
-                    return responseBuilder.createToolResponse("Tab closed successfully: " + tabName);
+                    return "Tab closed successfully: " + tabName;
                 }
             }
             
@@ -54,7 +53,7 @@ public class CloseTab implements Tool<CloseTabParams> {
                         String fileName = dataObject.getPrimaryFile().getName();
                         if (fileName.equals(tabName) || (fileName + "." + dataObject.getPrimaryFile().getExt()).equals(tabName)) {
                             tc.close();
-                            return responseBuilder.createToolResponse("Tab closed successfully: " + tabName);
+                            return "Tab closed successfully: " + tabName;
                         }
                     }
                 }
@@ -62,7 +61,7 @@ public class CloseTab implements Tool<CloseTabParams> {
             
             // If tab not found in open tabs
             LOGGER.warning("Tab not found for close request: '" + tabName + "'");
-            return responseBuilder.createToolResponse("Tab not currently open: " + tabName);
+            return "Tab not currently open: " + tabName;
             
         } catch (Exception e) {
             throw new RuntimeException("Failed to close tab: " + e.getMessage(), e);

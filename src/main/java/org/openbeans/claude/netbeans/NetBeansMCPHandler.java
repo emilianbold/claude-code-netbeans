@@ -237,35 +237,35 @@ public class NetBeansMCPHandler {
             switch (toolName) {
                 // Core Claude Code tools
                 case "openFile":
-                    return this.openFileTool.run(this.openFileTool.parseArguments(arguments), responseBuilder);
-                    
+                    return responseBuilder.createToolResponse(this.openFileTool.run(this.openFileTool.parseArguments(arguments)));
+
                 case "getWorkspaceFolders":
-                    return this.getWorkspaceFoldersTool.run(this.getWorkspaceFoldersTool.parseArguments(arguments), responseBuilder);
-                    
+                    return responseBuilder.createToolResponse(this.getWorkspaceFoldersTool.run(this.getWorkspaceFoldersTool.parseArguments(arguments)));
+
                 case "getOpenEditors":
-                    return this.getOpenEditorsTool.run(this.getOpenEditorsTool.parseArguments(arguments), responseBuilder);
-                    
+                    return responseBuilder.createToolResponse(this.getOpenEditorsTool.run(this.getOpenEditorsTool.parseArguments(arguments)));
+
                 case "getCurrentSelection":
-                    return this.getCurrentSelectionTool.run(this.getCurrentSelectionTool.parseArguments(arguments), responseBuilder);
-                    
+                    return responseBuilder.createToolResponse(this.getCurrentSelectionTool.run(this.getCurrentSelectionTool.parseArguments(arguments)));
+
                 case "close_tab":
-                    return this.closeTabTool.run(this.closeTabTool.parseArguments(arguments), responseBuilder);
-                    
+                    return responseBuilder.createToolResponse(this.closeTabTool.run(this.closeTabTool.parseArguments(arguments)));
+
                 case "getDiagnostics":
-                    return this.getDiagnosticsTool.run(this.getDiagnosticsTool.parseArguments(arguments), responseBuilder);
-                    
+                    return responseBuilder.createToolResponse(this.getDiagnosticsTool.run(this.getDiagnosticsTool.parseArguments(arguments)));
+
                 case "checkDocumentDirty":
-                    return this.checkDocumentDirtyTool.run(this.checkDocumentDirtyTool.parseArguments(arguments), responseBuilder);
-                    
+                    return responseBuilder.createToolResponse(this.checkDocumentDirtyTool.run(this.checkDocumentDirtyTool.parseArguments(arguments)));
+
                 case "saveDocument":
-                    return this.saveDocument.run(this.saveDocument.parseArguments(arguments), responseBuilder);
-                    
+                    return responseBuilder.createToolResponse(this.saveDocument.run(this.saveDocument.parseArguments(arguments)));
+
                 case "closeAllDiffTabs":
-                    return this.closeAllDiffTabsTool.run(this.closeAllDiffTabsTool.parseArguments(arguments), responseBuilder);
-                    
+                    return responseBuilder.createToolResponse(this.closeAllDiffTabsTool.run(this.closeAllDiffTabsTool.parseArguments(arguments)));
+
                 case "openDiff":
-                    return this.openDiffTool.run(this.openDiffTool.parseArguments(arguments), responseBuilder);
-                    
+                    return responseBuilder.createToolResponse(this.openDiffTool.run(this.openDiffTool.parseArguments(arguments)));
+
                 default:
                     throw new IllegalArgumentException("Unknown tool: " + toolName);
             }

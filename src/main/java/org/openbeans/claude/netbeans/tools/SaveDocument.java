@@ -1,11 +1,8 @@
 package org.openbeans.claude.netbeans.tools;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import org.openbeans.claude.netbeans.MCPResponseBuilder;
 import org.openbeans.claude.netbeans.NbUtils;
 import org.openbeans.claude.netbeans.tools.params.SaveDocumentParams;
 import org.openbeans.claude.netbeans.tools.params.SaveDocumentResult;
@@ -15,7 +12,7 @@ import org.openide.filesystems.FileUtil;
 import org.openide.loaders.DataObject;
 import org.openide.loaders.DataObjectNotFoundException;
 
-public class SaveDocument implements Tool<SaveDocumentParams> {
+public class SaveDocument implements Tool<SaveDocumentParams, SaveDocumentResult> {
 
     @Override
     public String getName() {
@@ -36,7 +33,7 @@ public class SaveDocument implements Tool<SaveDocumentParams> {
      * Saves a document to disk.
      */
     @Override
-    public JsonNode run(SaveDocumentParams saveParams, MCPResponseBuilder responseBuilder) throws FileNotFoundException, DataObjectNotFoundException, IOException {
+    public SaveDocumentResult run(SaveDocumentParams saveParams) throws FileNotFoundException, DataObjectNotFoundException, IOException {
         String filePath = saveParams.getFilePath();
 
         // Security check: Only allow saving files within open project directories
@@ -68,7 +65,7 @@ public class SaveDocument implements Tool<SaveDocumentParams> {
         result.setSaved(true);
         result.setMessage("Document saved successfully");
 
-        return responseBuilder.createToolResponse(result);
+        return result;
     }
 
 }

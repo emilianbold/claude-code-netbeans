@@ -1,13 +1,11 @@
 package org.openbeans.claude.netbeans.tools;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import java.io.File;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.netbeans.api.project.FileOwnerQuery;
 import org.netbeans.api.project.Project;
 import org.netbeans.api.project.ProjectUtils;
-import org.openbeans.claude.netbeans.MCPResponseBuilder;
 import org.openbeans.claude.netbeans.tools.params.GetOpenEditorsParams;
 import org.openbeans.claude.netbeans.tools.params.GetOpenEditorsResult;
 import org.openbeans.claude.netbeans.tools.params.Editor;
@@ -23,7 +21,7 @@ import org.openide.windows.TopComponent;
 /**
  * Tool to get list of currently open editor tabs.
  */
-public class GetOpenEditors implements Tool<GetOpenEditorsParams> {
+public class GetOpenEditors implements Tool<GetOpenEditorsParams, GetOpenEditorsResult> {
     
     private static final Logger LOGGER = Logger.getLogger(GetOpenEditors.class.getName());
     
@@ -41,9 +39,10 @@ public class GetOpenEditors implements Tool<GetOpenEditorsParams> {
     public Class<GetOpenEditorsParams> getParameterClass() {
         return GetOpenEditorsParams.class;
     }
-    
+
+
     @Override
-    public JsonNode run(GetOpenEditorsParams params, MCPResponseBuilder responseBuilder) throws Exception {
+    public GetOpenEditorsResult run(GetOpenEditorsParams params) throws Exception {
         GetOpenEditorsResult result = new GetOpenEditorsResult();
         List<Editor> editors = new ArrayList<>();
 
@@ -80,6 +79,6 @@ public class GetOpenEditors implements Tool<GetOpenEditorsParams> {
         }
 
         result.setEditors(editors);
-        return responseBuilder.createToolResponse(result);
+        return result;
     }
 }

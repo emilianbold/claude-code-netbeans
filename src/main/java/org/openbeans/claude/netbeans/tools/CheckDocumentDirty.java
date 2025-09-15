@@ -1,10 +1,8 @@
 package org.openbeans.claude.netbeans.tools;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import java.io.File;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import org.openbeans.claude.netbeans.MCPResponseBuilder;
 import org.openbeans.claude.netbeans.NbUtils;
 import org.openbeans.claude.netbeans.tools.params.CheckDocumentDirtyParams;
 import org.openbeans.claude.netbeans.tools.params.CheckDocumentDirtyResult;
@@ -16,7 +14,7 @@ import org.openide.loaders.DataObject;
 /**
  * Tool to check if a document has unsaved changes.
  */
-public class CheckDocumentDirty implements Tool<CheckDocumentDirtyParams> {
+public class CheckDocumentDirty implements Tool<CheckDocumentDirtyParams, CheckDocumentDirtyResult> {
     
     private static final Logger LOGGER = Logger.getLogger(CheckDocumentDirty.class.getName());
     
@@ -34,9 +32,9 @@ public class CheckDocumentDirty implements Tool<CheckDocumentDirtyParams> {
     public Class<CheckDocumentDirtyParams> getParameterClass() {
         return CheckDocumentDirtyParams.class;
     }
-    
+
     @Override
-    public JsonNode run(CheckDocumentDirtyParams params, MCPResponseBuilder responseBuilder) throws Exception {
+    public CheckDocumentDirtyResult run(CheckDocumentDirtyParams params) throws Exception {
         String filePath = params.getFilePath();
         
         try {
@@ -63,7 +61,7 @@ public class CheckDocumentDirty implements Tool<CheckDocumentDirtyParams> {
                         result.setIsDirty(isDirty);
                         result.setIsOpen(isOpen);
 
-                        return responseBuilder.createToolResponse(result);
+                        return result;
                     }
                 } catch (Exception e) {
                     LOGGER.log(Level.WARNING, "Error checking DataObject for file: " + filePath, e);
@@ -77,11 +75,18 @@ public class CheckDocumentDirty implements Tool<CheckDocumentDirtyParams> {
             result.setIsOpen(false);
             result.setNote("File not found or not currently managed by NetBeans");
 
-            return responseBuilder.createToolResponse(result);
+            return result;
             
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Error checking document dirty state: " + filePath, e);
-            return responseBuilder.createToolResponse("Error checking document dirty state: " + e.getMessage());
+
+            CheckDocumentDirtyResult errorResult = new CheckDocumentDirtyResult();
+            errorResult.setFilePath(filePath);
+            errorResult.setIsDirty(false);
+            errorResult.setIsOpen(false);
+            errorResult.setNote("Error checking document dirty state: " + e.getMessage());
+
+            return errorResult;
         }
     }
 }

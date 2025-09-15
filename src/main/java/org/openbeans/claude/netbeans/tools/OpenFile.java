@@ -1,10 +1,8 @@
 package org.openbeans.claude.netbeans.tools;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import java.io.File;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import org.openbeans.claude.netbeans.MCPResponseBuilder;
 import org.openbeans.claude.netbeans.NbUtils;
 import org.openbeans.claude.netbeans.tools.params.OpenFileParams;
 import org.openide.cookies.EditorCookie;
@@ -15,7 +13,7 @@ import org.openide.loaders.DataObject;
 /**
  * Tool to open a file in the NetBeans editor.
  */
-public class OpenFile implements Tool<OpenFileParams> {
+public class OpenFile implements Tool<OpenFileParams, String> {
     
     private static final Logger LOGGER = Logger.getLogger(OpenFile.class.getName());
     
@@ -33,9 +31,9 @@ public class OpenFile implements Tool<OpenFileParams> {
     public Class<OpenFileParams> getParameterClass() {
         return OpenFileParams.class;
     }
-    
+
     @Override
-    public JsonNode run(OpenFileParams params, MCPResponseBuilder responseBuilder) throws Exception {
+    public String run(OpenFileParams params) throws Exception {
         String filePath = params.getFilePath();
         boolean preview = params.getPreview() != null ? params.getPreview() : false;
         
@@ -59,7 +57,7 @@ public class OpenFile implements Tool<OpenFileParams> {
                     // Open the file in NetBeans editor
                     editorCookie.open();
                     
-                    return responseBuilder.createToolResponse("File opened successfully: " + filePath);
+                    return "File opened successfully: " + filePath;
                 }
             }
             

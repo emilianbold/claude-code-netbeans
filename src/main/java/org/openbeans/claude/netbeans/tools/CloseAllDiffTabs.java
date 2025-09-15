@@ -1,12 +1,10 @@
 package org.openbeans.claude.netbeans.tools;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import org.openbeans.claude.netbeans.MCPResponseBuilder;
 import org.openide.windows.TopComponent;
 
-public class CloseAllDiffTabs implements Tool<org.openbeans.claude.netbeans.tools.params.CloseAllDiffTabs> {
+public class CloseAllDiffTabs implements Tool<org.openbeans.claude.netbeans.tools.params.CloseAllDiffTabs, String> {
 
     private static final Logger LOGGER = Logger.getLogger(CloseAllDiffTabs.class.getName());
 
@@ -64,13 +62,13 @@ public class CloseAllDiffTabs implements Tool<org.openbeans.claude.netbeans.tool
     }
 
     @Override
-    public JsonNode run(org.openbeans.claude.netbeans.tools.params.CloseAllDiffTabs params, MCPResponseBuilder r) {
+    public String run(org.openbeans.claude.netbeans.tools.params.CloseAllDiffTabs params) {
         int count = this.closeAllDiffTabs();
 
         // This is the format expected, at least for 0 tabs...
         String text = "CLOSED_" + count + "_DIFF_TABS";
 
-        return r.createToolResponse(text);
+        return text;
     }
 
 }

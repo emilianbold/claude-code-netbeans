@@ -1,13 +1,11 @@
 package org.openbeans.claude.netbeans.tools;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Logger;
 import org.netbeans.api.project.Project;
 import org.netbeans.api.project.ProjectUtils;
 import org.netbeans.api.project.ui.OpenProjects;
-import org.openbeans.claude.netbeans.MCPResponseBuilder;
 import org.openbeans.claude.netbeans.tools.params.GetWorkspaceFoldersParams;
 import org.openbeans.claude.netbeans.tools.params.GetWorkspaceFoldersResult;
 import org.openbeans.claude.netbeans.tools.params.Folder;
@@ -15,7 +13,7 @@ import org.openbeans.claude.netbeans.tools.params.Folder;
 /**
  * Tool to get list of workspace folders (open projects).
  */
-public class GetWorkspaceFolders implements Tool<GetWorkspaceFoldersParams> {
+public class GetWorkspaceFolders implements Tool<GetWorkspaceFoldersParams, GetWorkspaceFoldersResult> {
     
     private static final Logger LOGGER = Logger.getLogger(GetWorkspaceFolders.class.getName());
     
@@ -33,7 +31,7 @@ public class GetWorkspaceFolders implements Tool<GetWorkspaceFoldersParams> {
     public Class<GetWorkspaceFoldersParams> getParameterClass() {
         return GetWorkspaceFoldersParams.class;
     }
-    
+
     /**
      * Data class to hold project information.
      */
@@ -64,7 +62,7 @@ public class GetWorkspaceFolders implements Tool<GetWorkspaceFoldersParams> {
     }
     
     @Override
-    public JsonNode run(GetWorkspaceFoldersParams params, MCPResponseBuilder responseBuilder) throws Exception {
+    public GetWorkspaceFoldersResult run(GetWorkspaceFoldersParams params) throws Exception {
         GetWorkspaceFoldersResult result = new GetWorkspaceFoldersResult();
         List<Folder> folders = new ArrayList<>();
 
@@ -80,6 +78,6 @@ public class GetWorkspaceFolders implements Tool<GetWorkspaceFoldersParams> {
         }
 
         result.setFolders(folders);
-        return responseBuilder.createToolResponse(result);
+        return result;
     }
 }
