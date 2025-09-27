@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Diagnostics Array Schema",
+  "description": "Schema for an array of diagnostic information objects",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "uri": {
+        "type": "string",
+        "description": "URI of the file being diagnosed",
+        "format": "uri"
+      },
+      "diagnostics": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string",
+              "description": "Diagnostic message"
+            },
+            "severity": {
+              "type": "string",
+              "description": "Severity level",
+              "enum": ["Warning", "Error", "Info"]
+            },
+            "range": {
+              "type": "object",
+              "properties": {
+                "start": {
+                  "type": "object",
+                  "properties": {
+                    "line": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "character": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": ["line", "character"]
+                },
+                "end": {
+                  "type": "object",
+                  "properties": {
+                    "line": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "character": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": ["line", "character"]
+                }
+              },
+              "required": ["start", "end"]
+            },
+            "source": {
+              "type": "string",
+              "description": "Source of the diagnostic"
+            },
+            "code": {
+              "type": "string",
+              "description": "Diagnostic code"
+            }
+          },
+          "required": ["message", "severity", "range", "source", "code"]
+        }
+      }
+    },
+    "required": ["uri", "diagnostics"]
+  }
+}

@@ -1,7 +1,8 @@
 package org.openbeans.claude.netbeans.tools;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.File;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
@@ -10,7 +11,12 @@ import javax.swing.text.Document;
 import org.netbeans.editor.AnnotationDesc;
 import org.netbeans.editor.Annotations;
 import org.openbeans.claude.netbeans.NbUtils;
+import org.openbeans.claude.netbeans.tools.params.Diagnostic;
+import org.openbeans.claude.netbeans.tools.params.DiagnosticsResponse;
 import org.openbeans.claude.netbeans.tools.params.GetDiagnosticsParams;
+import org.openbeans.claude.netbeans.tools.params.Range;
+import org.openbeans.claude.netbeans.tools.params.Start;
+import org.openbeans.claude.netbeans.tools.params.End;
 import org.openide.cookies.EditorCookie;
 import org.openide.filesystems.FileObject;
 import org.openide.filesystems.FileUtil;
@@ -21,34 +27,9 @@ import org.openide.windows.TopComponent;
 /**
  * Tool to get diagnostic information (errors, warnings) for files.
  */
-public class GetDiagnostics implements Tool<GetDiagnosticsParams, List<GetDiagnostics.DiagnosticData>> {
+public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
     
     private static final Logger LOGGER = Logger.getLogger(GetDiagnostics.class.getName());
-    
-    /**
-     * Data class to hold diagnostic information (errors, warnings) from NetBeans.
-     */
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public static class DiagnosticData {
-        public final String message;
-        public final String severity; // "error", "warning", "info", "hint"
-        public final String source;
-        public final String filePath;
-        public final int line;
-        public final int column;
-        public final String code; // error/warning code if available
-        
-        public DiagnosticData(String message, String severity, String source, 
-                            String filePath, int line, int column, String code) {
-            this.message = message;
-            this.severity = severity;
-            this.source = source;
-            this.filePath = filePath;
-            this.line = line;
-            this.column = column;
-            this.code = code;
-        }
-    }
     
     @Override
     public String getName() {
@@ -65,10 +46,9 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, List<GetDiagno
         return GetDiagnosticsParams.class;
     }
 
-    @Override
-    public List<GetDiagnostics.DiagnosticData> run(GetDiagnosticsParams params) throws Exception {
+    private List<DiagnosticsResponse> _run(GetDiagnosticsParams params) throws Exception {
         String uri = params.getUri();
-        
+
         try {
             if (uri != null) {
                 // Get diagnostics for a specific file
@@ -82,11 +62,63 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, List<GetDiagno
             return new ArrayList<>();
         }
     }
+
+    @Override
+    public String run(GetDiagnosticsParams params) throws Exception {
+        try {
+            List<DiagnosticsResponse> diagnostics = _run(params);
+            ObjectMapper mapper = new ObjectMapper();
+            return mapper.writeValueAsString(diagnostics);
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Failed to serialize diagnostics", e);
+            return "[]";
+        }
+    }
+
+    /**
+     * Creates a Diagnostic object from annotation data.
+     */
+    private Diagnostic createDiagnostic(String message, String severity, String source,
+                                      String code, int line, int column) {
+        Diagnostic diagnostic = new Diagnostic();
+        diagnostic.setMessage(message);
+
+        // Convert severity to enum
+        Diagnostic.Severity severityEnum;
+        if ("error".equalsIgnoreCase(severity)) {
+            severityEnum = Diagnostic.Severity.ERROR;
+        } else if ("warning".equalsIgnoreCase(severity)) {
+            severityEnum = Diagnostic.Severity.WARNING;
+        } else {
+            severityEnum = Diagnostic.Severity.INFO;
+        }
+        diagnostic.setSeverity(severityEnum);
+
+        diagnostic.setSource(source);
+        diagnostic.setCode(code);
+
+        // Create range (convert to 0-based line numbers)
+        Start start = new Start();
+        start.setLine(line - 1);
+        start.setCharacter(column);
+
+        End end = new End();
+        end.setLine(line - 1);
+        end.setCharacter(column);
+
+        Range range = new Range();
+        range.setStart(start);
+        range.setEnd(end);
+
+        diagnostic.setRange(range);
+
+        return diagnostic;
+    }
     
     /**
      * Extracts diagnostic information from NetBeans annotations for a specific file.
      */
-    private List<GetDiagnostics.DiagnosticData> getDiagnosticsForFile(String uri) {
+    private List<DiagnosticsResponse> getDiagnosticsForFile(String uri) {
         try {
             // Convert URI to file path
             String filePath = uri.startsWith("file://") ? uri.substring(7) : uri;
@@ -96,8 +128,14 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, List<GetDiagno
                 throw new SecurityException("File access denied: Path is not within any open project directory: " + filePath);
             }
             
-            List<GetDiagnostics.DiagnosticData> diagnostics = extractDiagnosticsFromFile(filePath);
-            return diagnostics;
+            List<Diagnostic> diagnostics = extractDiagnosticsFromFile(filePath);
+            if (!diagnostics.isEmpty()) {
+                DiagnosticsResponse response = new DiagnosticsResponse();
+                response.setUri(URI.create("file://" + filePath));
+                response.setDiagnostics(diagnostics);
+                return List.of(response);
+            }
+            return new ArrayList<>();
             
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Failed to get diagnostics for file: " + uri, e);
@@ -108,9 +146,9 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, List<GetDiagno
     /**
      * Gets diagnostics for all currently open files.
      */
-    private List<GetDiagnostics.DiagnosticData> getDiagnosticsForAllFiles() {
+    private List<DiagnosticsResponse> getDiagnosticsForAllFiles() {
         try {
-            List<GetDiagnostics.DiagnosticData> allDiagnostics = new ArrayList<>();
+            List<DiagnosticsResponse> allResponses = new ArrayList<>();
             
             // Go through all open TopComponents (editor tabs)
             for (TopComponent tc : TopComponent.getRegistry().getOpened()) {
@@ -122,15 +160,20 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, List<GetDiagno
                         if (fileObject != null) {
                             File file = FileUtil.toFile(fileObject);
                             if (file != null) {
-                                List<GetDiagnostics.DiagnosticData> fileDiagnostics = extractDiagnosticsFromFile(file.getAbsolutePath());
-                                allDiagnostics.addAll(fileDiagnostics);
+                                List<Diagnostic> fileDiagnostics = extractDiagnosticsFromFile(file.getAbsolutePath());
+                                if (!fileDiagnostics.isEmpty()) {
+                                    DiagnosticsResponse response = new DiagnosticsResponse();
+                                    response.setUri(URI.create("file://" + file.getAbsolutePath()));
+                                    response.setDiagnostics(fileDiagnostics);
+                                    allResponses.add(response);
+                                }
                             }
                         }
                     }
                 }
             }
             
-            return allDiagnostics;
+            return allResponses;
             
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Failed to get diagnostics for all files", e);
@@ -141,8 +184,8 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, List<GetDiagno
     /**
      * Extracts diagnostic information from a specific file using NetBeans editor annotations.
      */
-    private List<GetDiagnostics.DiagnosticData> extractDiagnosticsFromFile(String filePath) {
-        List<GetDiagnostics.DiagnosticData> diagnostics = new ArrayList<>();
+    private List<Diagnostic> extractDiagnosticsFromFile(String filePath) {
+        List<Diagnostic> diagnostics = new ArrayList<>();
         
         try {
             File file = new File(filePath);
@@ -167,8 +210,8 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, List<GetDiagno
                                     // Get the active annotation for this line
                                     AnnotationDesc activeAnnotation = annotations.getActiveAnnotation(currentLine);
                                     if (activeAnnotation != null) {
-                                        DiagnosticData diagnostic = convertAnnotationToDiagnostic(
-                                            activeAnnotation, filePath, currentLine + 1, 0);
+                                        Diagnostic diagnostic = convertAnnotationToDiagnostic(
+                                            activeAnnotation, currentLine + 1, 0);
                                         if (diagnostic != null) {
                                             diagnostics.add(diagnostic);
                                         }
@@ -178,8 +221,8 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, List<GetDiagno
                                     AnnotationDesc[] passiveAnnotations = annotations.getPassiveAnnotationsForLine(currentLine);
                                     if (passiveAnnotations != null) {
                                         for (AnnotationDesc annotation : passiveAnnotations) {
-                                            DiagnosticData diagnostic = convertAnnotationToDiagnostic(
-                                                annotation, filePath, currentLine + 1, 0);
+                                            Diagnostic diagnostic = convertAnnotationToDiagnostic(
+                                                annotation, currentLine + 1, 0);
                                             if (diagnostic != null) {
                                                 diagnostics.add(diagnostic);
                                             }
@@ -202,10 +245,10 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, List<GetDiagno
     }
     
     /**
-     * Converts a NetBeans AnnotationDesc to a DiagnosticData object.
+     * Converts a NetBeans AnnotationDesc to a Diagnostic object.
      */
-    private DiagnosticData convertAnnotationToDiagnostic(AnnotationDesc annotation, String filePath, 
-                                                       int lineNumber, int columnNumber) {
+    private Diagnostic convertAnnotationToDiagnostic(AnnotationDesc annotation,
+                                                   int lineNumber, int columnNumber) {
         if (annotation == null) {
             return null;
         }
@@ -244,6 +287,6 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, List<GetDiagno
             }
         }
         
-        return new GetDiagnostics.DiagnosticData(message, severity, source, filePath, lineNumber, columnNumber, code);
+        return createDiagnostic(message, severity, source, code, lineNumber, columnNumber);
     }
 }
