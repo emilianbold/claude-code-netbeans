@@ -1,10 +1,15 @@
 package org.openbeans.claude.netbeans.tools;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.openbeans.claude.netbeans.tools.params.CloseAllDiffTabsParams;
+import org.openbeans.claude.netbeans.tools.params.CloseAllDiffTabsResult;
+import org.openbeans.claude.netbeans.tools.params.Content;
 import org.openide.windows.TopComponent;
 
-public class CloseAllDiffTabs implements Tool<org.openbeans.claude.netbeans.tools.params.CloseAllDiffTabs, String> {
+public class CloseAllDiffTabs implements Tool<CloseAllDiffTabsParams, CloseAllDiffTabsResult> {
 
     private static final Logger LOGGER = Logger.getLogger(CloseAllDiffTabs.class.getName());
 
@@ -19,8 +24,8 @@ public class CloseAllDiffTabs implements Tool<org.openbeans.claude.netbeans.tool
     }
 
     @Override
-    public Class<org.openbeans.claude.netbeans.tools.params.CloseAllDiffTabs> getParameterClass() {
-        return org.openbeans.claude.netbeans.tools.params.CloseAllDiffTabs.class;
+    public Class<CloseAllDiffTabsParams> getParameterClass() {
+        return CloseAllDiffTabsParams.class;
     }
 
     private int closeAllDiffTabs() {
@@ -62,13 +67,15 @@ public class CloseAllDiffTabs implements Tool<org.openbeans.claude.netbeans.tool
     }
 
     @Override
-    public String run(org.openbeans.claude.netbeans.tools.params.CloseAllDiffTabs params) {
+    public CloseAllDiffTabsResult run(CloseAllDiffTabsParams params) {
         int count = this.closeAllDiffTabs();
 
-        // This is the format expected, at least for 0 tabs...
-        String text = "CLOSED_" + count + "_DIFF_TABS";
+        // Create the content array with the status message
+        List<Content> contentList = new ArrayList<>();
+        Content content = new Content("text", "CLOSED_" + count + "_DIFF_TABS");
+        contentList.add(content);
 
-        return text;
+        return new CloseAllDiffTabsResult(contentList);
     }
 
 }
