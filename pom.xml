@@ -11,6 +11,7 @@
 
     <name>Claude Code NetBeans Plugin</name>
     <description>NetBeans integration for Claude Code via Model Context Protocol</description>
+    <url>https://github.com/emilianbold/claude-code-netbeans</url>
 
     <licenses>
         <license>
@@ -20,9 +21,34 @@
         </license>
     </licenses>
 
+    <developers>
+        <developer>
+            <id>emilianbold</id>
+            <name>Emilian Bold</name>
+            <email>emi@apache.org</email>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:git://github.com/emilianbold/claude-code-netbeans.git</connection>
+        <developerConnection>scm:git:ssh://github.com:emilianbold/claude-code-netbeans.git</developerConnection>
+        <url>https://github.com/emilianbold/claude-code-netbeans</url>
+    </scm>
+
+    <distributionManagement>
+        <snapshotRepository>
+            <id>ossrh</id>
+            <url>https://oss.sonatype.org/content/repositories/snapshots</url>
+        </snapshotRepository>
+        <repository>
+            <id>ossrh</id>
+            <url>https://oss.sonatype.org/service/local/staging/deploy/maven2/</url>
+        </repository>
+    </distributionManagement>
+
     <properties>
-        <maven.compiler.source>11</maven.compiler.source>
-        <maven.compiler.target>11</maven.compiler.target>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <netbeans.version>RELEASE190</netbeans.version>
         <brandingToken>claude_code_netbeans</brandingToken>
@@ -195,8 +221,8 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.11.0</version>
                 <configuration>
-                    <source>11</source>
-                    <target>11</target>
+                    <source>17</source>
+                    <target>17</target>
                 </configuration>
             </plugin>
             <plugin>
@@ -240,6 +266,73 @@
                         </goals>
                     </execution>
                 </executions>
+            </plugin>
+
+            <!-- Maven Central publishing plugin -->
+            <plugin>
+                <groupId>org.sonatype.central</groupId>
+                <artifactId>central-publishing-maven-plugin</artifactId>
+                <version>0.9.0</version>
+                <extensions>true</extensions>
+                <configuration>
+                    <publishingServerId>central</publishingServerId>
+                    <autoPublish>false</autoPublish>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-source-plugin</artifactId>
+                <version>3.3.0</version>
+                <executions>
+                    <execution>
+                        <id>attach-sources</id>
+                        <goals>
+                            <goal>jar-no-fork</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <version>3.6.3</version>
+                <executions>
+                    <execution>
+                        <id>attach-javadocs</id>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <doclint>none</doclint>
+                    <quiet>true</quiet>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-gpg-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>sign-artifacts</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>sign</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <gpgArguments>
+                        <arg>--pinentry-mode</arg>
+                        <arg>loopback</arg>
+                        <arg>--batch</arg>
+                        <arg>--no-tty</arg>
+                    </gpgArguments>
+                </configuration>
             </plugin>
         </plugins>
     </build>

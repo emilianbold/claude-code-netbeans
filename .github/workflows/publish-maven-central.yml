@@ -1,0 +1,53 @@
+name: Publish to Maven Central
+
+on:
+  workflow_dispatch:
+  # Uncomment below when ready for automatic publishing on tags
+  # push:
+  #   tags:
+  #     - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'zulu'
+        cache: 'maven'
+
+    - name: Import GPG key
+      run: |
+        echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+        gpg --list-secret-keys --keyid-format LONG
+
+    - name: Create Maven settings.xml
+      run: |
+        mkdir -p ~/.m2
+        cat > ~/.m2/settings.xml <<EOF
+        <settings>
+          <servers>
+            <server>
+              <id>central</id>
+              <username>${{ secrets.MAVEN_USER }}</username>
+              <password>${{ secrets.MAVEN_PASSWORD }}</password>
+            </server>
+          </servers>
+        </settings>
+        EOF
+
+    - name: Deploy to Maven Central
+      run: mvn clean deploy -Dgpg.passphrase="${{ secrets.GPG_PASSPHRASE }}"
+
+    - name: Upload NBM artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: claude-code-netbeans-published
+        path: target/*.nbm
+        retention-days: 90
