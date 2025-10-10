@@ -43,7 +43,7 @@ jobs:
         EOF
 
     - name: Deploy to Maven Central
-      run: mvn clean deploy -Dgpg.passphrase="${{ secrets.GPG_PASSPHRASE }}"
+      run: mvn clean deploy -Prelease -Dgpg.passphrase="${{ secrets.GPG_PASSPHRASE }}"
 
     - name: Upload NBM artifact
       uses: actions/upload-artifact@v4
