@@ -15,15 +15,18 @@ import org.netbeans.api.diff.Difference;
 import org.netbeans.api.diff.StreamSource;
 import org.openbeans.claude.netbeans.EditorUtils;
 import org.openbeans.claude.netbeans.NbUtils;
+import java.util.ArrayList;
+import java.util.List;
 import org.openbeans.claude.netbeans.tools.params.OpenDiffParams;
 import org.openbeans.claude.netbeans.tools.params.OpenDiffResult;
+import org.openbeans.claude.netbeans.tools.params.Content;
 import org.openide.util.Lookup;
 import org.openide.windows.TopComponent;
 
 /**
  * Tool to open a git diff for the file.
  */
-public class OpenDiff implements Tool<OpenDiffParams, OpenDiffResult> {
+public class OpenDiff implements Tool<OpenDiffParams, AsyncResponse<OpenDiffResult>> {
     
     private static final Logger LOGGER = Logger.getLogger(OpenDiff.class.getName());
     
@@ -42,8 +45,24 @@ public class OpenDiff implements Tool<OpenDiffParams, OpenDiffResult> {
         return OpenDiffParams.class;
     }
 
+    private AsyncResponse<OpenDiffResult> createAsyncResponse(OpenDiffResult o) {
+        return new AsyncResponse<OpenDiffResult>() {
+            @Override
+            public void setHandler(AsyncHandler<OpenDiffResult> handler) {
+                handler.sendResponse(o);
+            }
+        };
+    }
+
+    private OpenDiffResult createErrorResult(String message) {
+        List<Content> contentList = new ArrayList<>();
+        Content content = new Content("text", message);
+        contentList.add(content);
+        return new OpenDiffResult(contentList);
+    }
+
     @Override
-    public OpenDiffResult run(OpenDiffParams params) throws Exception {
+    public AsyncResponse<OpenDiffResult> run(OpenDiffParams params) throws Exception {
         String oldFilePath = params.getOldFilePath();
         String newFilePath = params.getNewFilePath();
         String newFileContents = params.getNewFileContents();
@@ -61,10 +80,7 @@ public class OpenDiff implements Tool<OpenDiffParams, OpenDiffResult> {
             if (oldFilePath == null || newFilePath == null) {
                 currentEditorPath = EditorUtils.getCurrentEditorFilePath();
                 if (currentEditorPath == null) {
-                    OpenDiffResult errorResult = new OpenDiffResult();
-                    errorResult.setSuccess(false);
-                    errorResult.setMessage("No active editor found. Please specify file paths or open a file in the editor.");
-                    return errorResult;
+                    return createAsyncResponse(createErrorResult("No active editor found. Please specify file paths or open a file in the editor."));
                 }
                 usingCurrentEditor = true;
                 currentEditorContent = EditorUtils.getCurrentEditorContent(); // Get the buffer content with unsaved changes
@@ -94,19 +110,13 @@ public class OpenDiff implements Tool<OpenDiffParams, OpenDiffResult> {
                 // Otherwise read from disk
                 if (!oldFile.exists()) {
                     LOGGER.warning("Old file does not exist for diff: " + finalOldFilePath);
-                    OpenDiffResult errorResult = new OpenDiffResult();
-                    errorResult.setSuccess(false);
-                    errorResult.setMessage("Old file does not exist: " + finalOldFilePath);
-                    return errorResult;
+                    return createAsyncResponse(createErrorResult("Old file does not exist: " + finalOldFilePath));
                 }
                 try {
                     oldFileContents = Files.readString(oldFile.toPath(), StandardCharsets.UTF_8);
                 } catch (IOException e) {
                     LOGGER.log(Level.WARNING, "Failed to read old file for diff: " + finalOldFilePath, e);
-                    OpenDiffResult errorResult = new OpenDiffResult();
-                    errorResult.setSuccess(false);
-                    errorResult.setMessage("Failed to read old file: " + e.getMessage());
-                    return errorResult;
+                    return createAsyncResponse(createErrorResult("Failed to read old file: " + e.getMessage()));
                 }
             }
             
@@ -121,19 +131,13 @@ public class OpenDiff implements Tool<OpenDiffParams, OpenDiffResult> {
                     File newFile = new File(finalNewFilePath);
                     if (!newFile.exists()) {
                         LOGGER.warning("New file does not exist for diff: " + finalNewFilePath);
-                        OpenDiffResult errorResult = new OpenDiffResult();
-                        errorResult.setSuccess(false);
-                        errorResult.setMessage("New file does not exist: " + finalNewFilePath);
-                        return errorResult;
+                        return createAsyncResponse(createErrorResult("New file does not exist: " + finalNewFilePath));
                     }
                     try {
                         finalNewFileContents = Files.readString(newFile.toPath(), StandardCharsets.UTF_8);
                     } catch (IOException e) {
                         LOGGER.log(Level.WARNING, "Failed to read new file for diff: " + finalNewFilePath, e);
-                        OpenDiffResult errorResult = new OpenDiffResult();
-                        errorResult.setSuccess(false);
-                        errorResult.setMessage("Failed to read new file: " + e.getMessage());
-                        return errorResult;
+                        return createAsyncResponse(createErrorResult("Failed to read new file: " + e.getMessage()));
                     }
                 }
             } else {
@@ -206,6 +210,8 @@ public class OpenDiff implements Tool<OpenDiffParams, OpenDiffResult> {
                     if (diffView != null) {
                         // Open the diff view
                         java.awt.Component component = diffView.getComponent();
+                        final String finalDiffTabName = diffTabName;
+
                         if (component instanceof TopComponent) {
                             TopComponent diffTC = (TopComponent) component;
                             diffTC.setDisplayName(diffTabName);
@@ -215,43 +221,31 @@ public class OpenDiff implements Tool<OpenDiffParams, OpenDiffResult> {
                             // If it's not a TopComponent, try to show it in another way
                             LOGGER.log(Level.WARNING, "Diff component is not a TopComponent: {0}", component.getClass());
                         }
-                        
-                        OpenDiffResult result = new OpenDiffResult();
-                        result.setSuccess(true);
-                        result.setTabName(diffTabName);
-                        result.setOldFile(finalOldFilePath);
-                        result.setNewFile(finalNewFilePath);
-                        result.setMessage("Diff viewer opened successfully");
 
-                        return result;
+                        // Return async response - will be resolved when user accepts/rejects diff
+                        return new AsyncResponse<OpenDiffResult>() {
+                            @Override
+                            public void setHandler(AsyncHandler<OpenDiffResult> handler) {
+                                LOGGER.info("Registering async handler for diff tab: " + finalDiffTabName);
+                                DiffTabTracker.register(finalDiffTabName, handler);
+                            }
+                        };
                     } else {
                         LOGGER.warning("Failed to create diff view - diffView is null");
-                        OpenDiffResult errorResult = new OpenDiffResult();
-                        errorResult.setSuccess(false);
-                        errorResult.setMessage("Failed to create diff view");
-                        return errorResult;
+                        return createAsyncResponse(createErrorResult("Failed to create diff view"));
                     }
                 } catch (IOException e) {
                     LOGGER.log(Level.WARNING, "Error creating diff view", e);
-                    OpenDiffResult errorResult = new OpenDiffResult();
-                    errorResult.setSuccess(false);
-                    errorResult.setMessage("Error creating diff: " + e.getMessage());
-                    return errorResult;
+                    return createAsyncResponse(createErrorResult("Error creating diff: " + e.getMessage()));
                 }
             } else {
                 LOGGER.warning("Diff service not available - no Diff implementation found in Lookup");
-                OpenDiffResult errorResult = new OpenDiffResult();
-                errorResult.setSuccess(false);
-                errorResult.setMessage("Diff service not available");
-                return errorResult;
+                return createAsyncResponse(createErrorResult("Diff service not available"));
             }
             
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Error opening diff", e);
-            OpenDiffResult errorResult = new OpenDiffResult();
-            errorResult.setSuccess(false);
-            errorResult.setMessage("Error opening diff: " + e.getMessage());
-            return errorResult;
+            return createAsyncResponse(createErrorResult("Error opening diff: " + e.getMessage()));
         }
     }
 }

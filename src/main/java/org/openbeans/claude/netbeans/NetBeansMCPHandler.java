@@ -36,9 +36,12 @@ import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import org.netbeans.api.project.ui.OpenProjects;
 import java.io.IOException;
+import org.openbeans.claude.netbeans.tools.AsyncHandler;
+import org.openbeans.claude.netbeans.tools.AsyncResponse;
 import org.openbeans.claude.netbeans.tools.CheckDocumentDirty;
 import org.openbeans.claude.netbeans.tools.CloseAllDiffTabs;
 import org.openbeans.claude.netbeans.tools.CloseTab;
+import org.openbeans.claude.netbeans.tools.DiffTabTracker;
 import org.openbeans.claude.netbeans.tools.GetCurrentSelection;
 import org.openbeans.claude.netbeans.tools.GetDiagnostics;
 import org.openbeans.claude.netbeans.tools.GetOpenEditors;
@@ -46,6 +49,8 @@ import org.openbeans.claude.netbeans.tools.GetWorkspaceFolders;
 import org.openbeans.claude.netbeans.tools.OpenDiff;
 import org.openbeans.claude.netbeans.tools.OpenFile;
 import org.openbeans.claude.netbeans.tools.SaveDocument;
+import org.openbeans.claude.netbeans.tools.params.Content;
+import org.openbeans.claude.netbeans.tools.params.OpenDiffResult;
 
 /**
  * Handles Model Context Protocol messages and provides NetBeans IDE capabilities
@@ -62,6 +67,7 @@ public class NetBeansMCPHandler {
     // Selection tracking
     private final Map<JTextComponent, CaretListener> selectionListeners = new WeakHashMap<>();
     private PropertyChangeListener topComponentListener;
+    private PropertyChangeListener diffTabListener;
     private JTextComponent currentTextComponent;
     
     private final CheckDocumentDirty checkDocumentDirtyTool;
@@ -123,7 +129,12 @@ public class NetBeansMCPHandler {
                     break;
                     
                 case "tools/call":
-                    response.set("result", handleToolsCall(params));
+                    JsonNode toolResult = handleToolsCall(params, id);
+                    if (toolResult == null) {
+                        // Async tool - no immediate response
+                        return null;
+                    }
+                    response.set("result", toolResult);
                     break;
                     
                 case "resources/list":
@@ -226,53 +237,108 @@ public class NetBeansMCPHandler {
     
     /**
      * Handles tool call requests.
+     * @param params Tool call parameters
+     * @param requestId Request ID for async response handling
+     * @return JsonNode result for sync tools, null for async tools
      */
-    private JsonNode handleToolsCall(JsonNode params) {
+    private JsonNode handleToolsCall(JsonNode params, Integer requestId) {
         String toolName = params.get("name").asText();
         JsonNode arguments = params.get("arguments");
         
         try {
-            ObjectMapper mapper = new ObjectMapper();
-            
+            Object result;
+
             switch (toolName) {
                 // Core Claude Code tools
                 case "openFile":
-                    return responseBuilder.createToolResponse(this.openFileTool.run(this.openFileTool.parseArguments(arguments)));
+                    result = this.openFileTool.run(this.openFileTool.parseArguments(arguments));
+                    break;
 
                 case "getWorkspaceFolders":
-                    return responseBuilder.createToolResponse(this.getWorkspaceFoldersTool.run(this.getWorkspaceFoldersTool.parseArguments(arguments)));
+                    result = this.getWorkspaceFoldersTool.run(this.getWorkspaceFoldersTool.parseArguments(arguments));
+                    break;
 
                 case "getOpenEditors":
-                    return responseBuilder.createToolResponse(this.getOpenEditorsTool.run(this.getOpenEditorsTool.parseArguments(arguments)));
+                    result = this.getOpenEditorsTool.run(this.getOpenEditorsTool.parseArguments(arguments));
+                    break;
 
                 case "getCurrentSelection":
-                    return responseBuilder.createToolResponse(this.getCurrentSelectionTool.run(this.getCurrentSelectionTool.parseArguments(arguments)));
+                    result = this.getCurrentSelectionTool.run(this.getCurrentSelectionTool.parseArguments(arguments));
+                    break;
 
                 case "close_tab":
-                    return responseBuilder.createToolResponse(this.closeTabTool.run(this.closeTabTool.parseArguments(arguments)));
+                    result = this.closeTabTool.run(this.closeTabTool.parseArguments(arguments));
+                    break;
 
                 case "getDiagnostics":
-                    return responseBuilder.createToolResponse(this.getDiagnosticsTool.run(this.getDiagnosticsTool.parseArguments(arguments)));
+                    result = this.getDiagnosticsTool.run(this.getDiagnosticsTool.parseArguments(arguments));
+                    break;
 
                 case "checkDocumentDirty":
-                    return responseBuilder.createToolResponse(this.checkDocumentDirtyTool.run(this.checkDocumentDirtyTool.parseArguments(arguments)));
+                    result = this.checkDocumentDirtyTool.run(this.checkDocumentDirtyTool.parseArguments(arguments));
+                    break;
 
                 case "saveDocument":
-                    return responseBuilder.createToolResponse(this.saveDocument.run(this.saveDocument.parseArguments(arguments)));
+                    result = this.saveDocument.run(this.saveDocument.parseArguments(arguments));
+                    break;
 
                 case "closeAllDiffTabs":
-                    return responseBuilder.createToolResponse(this.closeAllDiffTabsTool.run(this.closeAllDiffTabsTool.parseArguments(arguments)));
+                    result = this.closeAllDiffTabsTool.run(this.closeAllDiffTabsTool.parseArguments(arguments));
+                    break;
 
                 case "openDiff":
-                    return responseBuilder.createToolResponse(this.openDiffTool.run(this.openDiffTool.parseArguments(arguments)));
+                    result = this.openDiffTool.run(this.openDiffTool.parseArguments(arguments));
+                    break;
 
                 default:
                     throw new IllegalArgumentException("Unknown tool: " + toolName);
             }
+
+            // Check if result is async
+            if (result instanceof AsyncResponse) {
+                AsyncResponse asyncResponse = (AsyncResponse) result;
+                asyncResponse.setHandler(new AsyncHandler() {
+                    @Override
+                    public void sendResponse(Object finalResult) {
+                        sendAsyncToolResponse(requestId, finalResult);
+                    }
+                });
+                return null; // No immediate response
+            }
+
+            // Sync response
+            return responseBuilder.createToolResponse(result);
+
         } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Error executing tool: " + toolName, e);
             
             return responseBuilder.createToolResponse("Error: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Sends an async tool response via WebSocket.
+     * @param requestId The original request ID
+     * @param result The tool result to send
+     */
+    private void sendAsyncToolResponse(Integer requestId, Object result) {
+        try {
+            if (webSocketSession == null || !webSocketSession.isOpen()) {
+                LOGGER.warning("Cannot send async response - WebSocket not open");
+                return;
+            }
+
+            ObjectNode response = responseBuilder.objectNode();
+            response.put("jsonrpc", "2.0");
+            response.put("id", requestId);
+            response.set("result", responseBuilder.createToolResponse(result));
+
+            String message = objectMapper.writeValueAsString(response);
+            webSocketSession.getRemote().sendString(message);
+
+            LOGGER.log(Level.INFO, "Sent async tool response for request ID: {0}", requestId);
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Error sending async tool response", e);
         }
     }
     
@@ -436,11 +502,13 @@ public class NetBeansMCPHandler {
         this.webSocketSession = session;
         
         if (session != null) {
-            // Start tracking selection changes when connected
+            // Start tracking selection changes and diff tabs when connected
             startSelectionTracking();
+            startDiffTabTracking();
         } else {
             // Stop tracking when disconnected
             stopSelectionTracking();
+            stopDiffTabTracking();
         }
     }
     
@@ -491,7 +559,59 @@ public class NetBeansMCPHandler {
         
         LOGGER.log(Level.FINE, "Stopped selection tracking");
     }
-    
+
+    /**
+     * Starts tracking diff tab closures for async response handling.
+     */
+    private void startDiffTabTracking() {
+        diffTabListener = new PropertyChangeListener() {
+            @Override
+            public void propertyChange(PropertyChangeEvent evt) {
+                if (TopComponent.Registry.PROP_TC_CLOSED.equals(evt.getPropertyName())) {
+                    TopComponent closed = (TopComponent) evt.getNewValue();
+                    if (closed != null) {
+                        String tabName = closed.getDisplayName();
+                        if (tabName != null && DiffTabTracker.isTracked(tabName)) {
+                            handleDiffTabClosed(tabName);
+                        }
+                    }
+                }
+            }
+        };
+
+        TopComponent.getRegistry().addPropertyChangeListener(diffTabListener);
+        LOGGER.log(Level.FINE, "Started diff tab tracking");
+    }
+
+    /**
+     * Stops tracking diff tab closures.
+     */
+    private void stopDiffTabTracking() {
+        if (diffTabListener != null) {
+            TopComponent.getRegistry().removePropertyChangeListener(diffTabListener);
+            diffTabListener = null;
+        }
+        LOGGER.log(Level.FINE, "Stopped diff tab tracking");
+    }
+
+    /**
+     * Handles a diff tab being closed, sending the async response.
+     */
+    private void handleDiffTabClosed(String tabName) {
+        AsyncHandler handler = DiffTabTracker.remove(tabName);
+        if (handler != null) {
+            LOGGER.log(Level.INFO, "Diff tab closed: {0}", tabName);
+
+            // Create response with DIFF_REJECTED status
+            List<Content> contentList = new ArrayList<>();
+            contentList.add(new Content("text", "DIFF_REJECTED"));
+            contentList.add(new Content("text", tabName));
+            OpenDiffResult result = new OpenDiffResult(contentList);
+
+            handler.sendResponse(result);
+        }
+    }
+
     /**
      * Tracks selection changes in the given TopComponent if it's an editor.
      */

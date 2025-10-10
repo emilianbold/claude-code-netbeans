@@ -20,5 +20,11 @@ public interface Tool<T, O> {
         return mapper.convertValue(arguments, getParameterClass());
     }
 
+    /**
+     * Execute the tool with the given parameters.
+     * @param params Parsed tool parameters
+     * @return Either the result object (for sync tools) or an AsyncResponse (for async tools)
+     * @throws Exception if the tool execution fails
+     */
     O run(T params) throws Exception;
 }
