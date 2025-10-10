@@ -15,7 +15,7 @@ jobs:
     
     strategy:
       matrix:
-        java-version: [11, 17]
+        java-version: [17]
     
     steps:
     - name: Checkout repository
@@ -25,7 +25,7 @@ jobs:
       uses: actions/setup-java@v4
       with:
         java-version: ${{ matrix.java-version }}
-        distribution: 'temurin'
+        distribution: 'zulu'
         cache: 'maven'
     
     - name: Build NBM plugin
@@ -52,11 +52,11 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
     
-    - name: Set up JDK 11
+    - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
-        java-version: '11'
-        distribution: 'temurin'
+        java-version: '17'
+        distribution: 'zulu'
         cache: 'maven'
     
     - name: Build NBM for release
