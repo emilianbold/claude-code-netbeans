@@ -28,7 +28,7 @@ public class CloseAllDiffTabs implements Tool<CloseAllDiffTabsParams, CloseAllDi
         return CloseAllDiffTabsParams.class;
     }
 
-    private int closeAllDiffTabs() {
+    /* package protected */ int closeAllDiffTabs() {
         int closedCount = 0;
 
         // Get all open TopComponents and look for diff viewers

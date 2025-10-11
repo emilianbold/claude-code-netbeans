@@ -1,8 +1,10 @@
 package org.openbeans.claude.netbeans;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.TextNode;
 
 /**
  * Utility class for building MCP protocol-compliant responses.
@@ -37,19 +39,11 @@ public class MCPResponseBuilder {
         return result;
     }
     
-    /**
-     * Creates a tool response with JSON content.
-     * Serializes the object to JSON string and wraps it in the MCP format.
-     * 
-     * @param data The data object to include in the response
-     * @return ObjectNode containing the properly formatted response
-     */
-    public ObjectNode createToolResponse(Object data) {
-        try {
-            String jsonText = objectMapper.writeValueAsString(data);
-            return createToolResponse(jsonText);
-        } catch (Exception e) {
-            return createToolResponse("Error serializing response: " + e.getMessage());
+    public JsonNode createToolResponse(Object data) {
+        if (data instanceof String) {
+            return new TextNode((String)data);
+        } else {
+            return objectMapper.convertValue(data, ObjectNode.class);
         }
     }
     
