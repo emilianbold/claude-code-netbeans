@@ -6,7 +6,7 @@
 
     <groupId>org.openbeans</groupId>
     <artifactId>claude-code-netbeans</artifactId>
-    <version>1.0.8</version>
+    <version>1.2.0</version>
     <packaging>nbm</packaging>
 
     <name>Claude Code NetBeans Plugin</name>
