@@ -426,20 +426,6 @@ public class NetBeansMCPHandler {
         return result;
     }
     
-    // Tool implementation methods
-    
-    private JsonNode handleReadFile(String filePath) throws IOException {
-        // Security check: Only allow reading files within open project directories
-        if (!NbUtils.isPathWithinOpenProjects(filePath)) {
-            throw new SecurityException("File read denied: Path is not within any open project directory: " + filePath);
-        }
-        
-        Path path = Paths.get(filePath);
-        String content = Files.readString(path, StandardCharsets.UTF_8);
-        
-        return responseBuilder.createToolResponse(content);
-    }
-    
     // Helper methods
     
     private JsonNode getProjectInfo(String projectPath) {
