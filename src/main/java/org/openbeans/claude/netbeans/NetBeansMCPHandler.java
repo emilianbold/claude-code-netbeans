@@ -227,7 +227,7 @@ public class NetBeansMCPHandler {
         tools.add(createToolDefinition("getDiagnostics", "Get diagnostic information (errors, warnings) for files", "GetDiagnosticsParams"));
         tools.add(createToolDefinition("checkDocumentDirty", "Check if a document has unsaved changes", "CheckDocumentDirtyParams"));
         tools.add(createToolDefinition("saveDocument", "Save a document to disk", "SaveDocumentParams"));
-        tools.add(createToolDefinition("closeAllDiffTabs", "Close all diff viewer tabs", "closeAllDiffTabs"));
+        tools.add(createToolDefinition("closeAllDiffTabs", "Close all diff viewer tabs", "CloseAllDiffTabsParams"));
         tools.add(createToolDefinition("openDiff", "Open a git diff for the file", "OpenDiffParams"));
         
         ObjectNode result = responseBuilder.objectNode();
