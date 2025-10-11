@@ -22,24 +22,25 @@ import org.openbeans.claude.netbeans.tools.params.OpenDiffResult;
 import org.openbeans.claude.netbeans.tools.params.Content;
 import org.openide.util.Lookup;
 import org.openide.windows.TopComponent;
+import javax.swing.SwingUtilities;
 
 /**
  * Tool to open a git diff for the file.
  */
 public class OpenDiff implements Tool<OpenDiffParams, AsyncResponse<OpenDiffResult>> {
-    
+
     private static final Logger LOGGER = Logger.getLogger(OpenDiff.class.getName());
-    
+
     @Override
     public String getName() {
         return "openDiff";
     }
-    
+
     @Override
     public String getDescription() {
         return "Open a git diff for the file";
     }
-    
+
     @Override
     public Class<OpenDiffParams> getParameterClass() {
         return OpenDiffParams.class;
@@ -67,13 +68,13 @@ public class OpenDiff implements Tool<OpenDiffParams, AsyncResponse<OpenDiffResu
         String newFilePath = params.getNewFilePath();
         String newFileContents = params.getNewFileContents();
         String tabName = params.getTabName();
-        
+
         try {
             // Track if we're using the current editor for defaults
             boolean usingCurrentEditor = false;
             String currentEditorPath = null;
             String currentEditorContent = null;
-            
+
             // If paths are not provided, use current active editor
             String finalOldFilePath;
             String finalNewFilePath;
@@ -90,7 +91,7 @@ public class OpenDiff implements Tool<OpenDiffParams, AsyncResponse<OpenDiffResu
                 finalOldFilePath = oldFilePath;
                 finalNewFilePath = newFilePath;
             }
-            
+
             // Security check: Only allow diffing files within open project directories
             if (!NbUtils.isPathWithinOpenProjects(finalOldFilePath)) {
                 throw new SecurityException("File access denied: old_file_path is not within any open project directory: " + finalOldFilePath);
@@ -98,11 +99,11 @@ public class OpenDiff implements Tool<OpenDiffParams, AsyncResponse<OpenDiffResu
             if (!NbUtils.isPathWithinOpenProjects(finalNewFilePath)) {
                 throw new SecurityException("File access denied: new_file_path is not within any open project directory: " + finalNewFilePath);
             }
-            
+
             // Read the old file content
             final File oldFile = new File(finalOldFilePath);
             final String oldFileContents;
-            
+
             // If old file is the current editor and we're using it as default, use the editor buffer content
             if (usingCurrentEditor && oldFilePath == null && finalOldFilePath.equals(currentEditorPath) && currentEditorContent != null) {
                 oldFileContents = currentEditorContent;
@@ -119,7 +120,7 @@ public class OpenDiff implements Tool<OpenDiffParams, AsyncResponse<OpenDiffResu
                     return createAsyncResponse(createErrorResult("Failed to read old file: " + e.getMessage()));
                 }
             }
-            
+
             // If new file contents not provided, determine how to get them
             final String finalNewFileContents;
             if (newFileContents == null) {
@@ -143,84 +144,126 @@ public class OpenDiff implements Tool<OpenDiffParams, AsyncResponse<OpenDiffResu
             } else {
                 finalNewFileContents = newFileContents;
             }
-            
+
             // Create stream sources for diff
             StreamSource oldSource = new StreamSource() {
                 @Override
                 public String getName() {
                     return oldFile.getName() + " (original)";
                 }
-                
+
                 @Override
                 public String getTitle() {
                     return finalOldFilePath;
                 }
-                
+
                 @Override
                 public String getMIMEType() {
                     return "text/plain";
                 }
-                
+
                 @Override
                 public Reader createReader() throws IOException {
                     return new StringReader(oldFileContents);
                 }
-                
+
                 @Override
                 public Writer createWriter(Difference[] conflicts) throws IOException {
                     throw new IOException("Writing not supported for original file");
                 }
             };
-            
+
             StreamSource newSource = new StreamSource() {
                 @Override
                 public String getName() {
                     return new File(finalNewFilePath).getName() + " (modified)";
                 }
-                
+
                 @Override
                 public String getTitle() {
                     return finalNewFilePath;
                 }
-                
+
                 @Override
                 public String getMIMEType() {
                     return "text/plain";
                 }
-                
+
                 @Override
                 public Reader createReader() throws IOException {
                     return new StringReader(finalNewFileContents);
                 }
-                
+
                 @Override
                 public Writer createWriter(Difference[] conflicts) throws IOException {
                     throw new IOException("Writing not supported for modified content");
                 }
             };
-            
+
             // Get Diff service and create diff view
             Diff diffService = Lookup.getDefault().lookup(Diff.class);
             if (diffService != null) {
                 try {
-                    String diffTabName = tabName != null ? tabName : 
-                        "Diff: " + oldFile.getName() + " vs " + new File(finalNewFilePath).getName();
-                        
+                    String diffTabName = tabName != null ? tabName
+                            : "Diff: " + oldFile.getName() + " vs " + new File(finalNewFilePath).getName();
+
                     DiffView diffView = diffService.createDiff(oldSource, newSource);
                     if (diffView != null) {
-                        // Open the diff view
-                        java.awt.Component component = diffView.getComponent();
+                        // Wrap the diff view in a TopComponent (recommended pattern)
                         final String finalDiffTabName = diffTabName;
+                        TopComponent diffTC = new TopComponent();
+                        diffTC.setDisplayName(diffTabName);
+                        diffTC.setLayout(new java.awt.BorderLayout());
 
-                        if (component instanceof TopComponent) {
-                            TopComponent diffTC = (TopComponent) component;
-                            diffTC.setDisplayName(diffTabName);
+                        // Add toolbar with approve button
+                        javax.swing.JToolBar toolbar = diffView.getToolBar();
+                        if (toolbar == null) {
+                            toolbar = new javax.swing.JToolBar();
+                        }
+
+                        // Create approve button
+                        javax.swing.JButton approveButton = new javax.swing.JButton("✓ Approve");
+                        approveButton.setToolTipText("Approve and apply this diff");
+                        approveButton.addActionListener(e -> {
+                            // Get the handler from DiffTabTracker
+                            LOGGER.info("Diff approved: " + finalDiffTabName);
+
+                            //NOTE: While the message says FILE_SAVED, the IDE does not need to save it. Claude will want to write to it.
+                            // If needed, we could also do it via
+                            //
+                            //    FileObject fo = FileUtil.toFileObject(file);
+                            //    DataObject dao = DataObject.find(fo);
+                            //    EditorCookie ec = dao.getLookup().lookup(EditorCookie.class);
+                            //    StyledDocument doc = ec.openDocument();
+                            //    doc.remove(0, doc.getLength());
+                            //    doc.insertString(0, content, null);
+                            //    SaveCookie save = dao.getLookup().lookup(SaveCookie.class);
+                            //    save.save();
+                            // but then Claude actually gets confused:
+                            //    > Error: File has been unexpectedly modified. Read it again before attempting to write it.
+
+                            // Create response with DIFF_ACCEPTED status
+                            List<Content> contentList = new ArrayList<>();
+                            contentList.add(new Content("text", "FILE_SAVED"));
+                            contentList.add(new Content("text", finalNewFileContents));
+                            OpenDiffResult result = new OpenDiffResult(contentList);
+
+                            DiffTabTracker.setResponse(finalDiffTabName, result);
+
+                            // Note: We do not close the diff tab here. Claude Code will close the tab via command.
+                        });
+
+                        // Add approve button as first button in toolbar
+                        toolbar.add(approveButton, 0);
+                        diffTC.add(toolbar, java.awt.BorderLayout.NORTH);
+
+                        diffTC.add(diffView.getComponent(), java.awt.BorderLayout.CENTER);
+
+                        // Open the TopComponent on the EDT (Event Dispatch Thread)
+                        SwingUtilities.invokeLater(() -> {
                             diffTC.open();
                             diffTC.requestActive();
-                        } else {
-                            // If it's not a TopComponent, try to show it in another way
-                            LOGGER.log(Level.WARNING, "Diff component is not a TopComponent: {0}", component.getClass());
-                        }
+                        });
 
                         // Return async response - will be resolved when user accepts/rejects diff
                         return new AsyncResponse<OpenDiffResult>() {
@@ -242,7 +285,7 @@ public class OpenDiff implements Tool<OpenDiffParams, AsyncResponse<OpenDiffResu
                 LOGGER.warning("Diff service not available - no Diff implementation found in Lookup");
                 return createAsyncResponse(createErrorResult("Diff service not available"));
             }
-            
+
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Error opening diff", e);
             return createAsyncResponse(createErrorResult("Error opening diff: " + e.getMessage()));

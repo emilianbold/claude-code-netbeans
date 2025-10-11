@@ -3,6 +3,8 @@ package org.openbeans.claude.netbeans.tools;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 
+import org.openbeans.claude.netbeans.tools.params.OpenDiffResult;
+
 /**
  * Tracks pending diff tabs and their async response handlers.
  * When a diff tab is closed or accepted, the corresponding handler is notified.
@@ -34,6 +36,15 @@ public class DiffTabTracker {
             LOGGER.info("Removed async handler for diff tab: " + tabName);
         }
         return handler;
+    }
+
+    public static void setResponse(String tabName, OpenDiffResult result) {
+        AsyncHandler handler = pendingDiffs.getOrDefault(tabName, null);
+        if (handler != null) {
+            handler.sendResponse(result);
+        } else {
+            LOGGER.warning("No async handler found for diff tab: " + tabName);
+        }
     }
 
     /**
