@@ -2,6 +2,8 @@
 
 A NetBeans IDE plugin that provides integration with Claude Code through the Model Context Protocol (MCP).
 
+![Downloads](https://img.shields.io/endpoint?url=https://openbeans.org/plugin-counter/api/118)
+
 ## Features
 
 - **Automatic Detection**: Creates a lock file that Claude Code CLI can discover
