@@ -175,6 +175,8 @@ mvn clean package
 
 ## Contributing
 
+Due to my current job situation, I'm no longer able to actively contribute to this project. However, contributions from the community are very welcome! Feel free to:
+
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
