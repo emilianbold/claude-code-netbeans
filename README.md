@@ -1,5 +1,7 @@
 # Claude Code NetBeans Plugin
 
+> **Looking for maintainers:** Due to my current job situation, I'm no longer able to actively contribute to this project. The plugin is essentially unmaintained and needs help. Contributions and new maintainers are very welcome!
+
 A NetBeans IDE plugin that provides integration with Claude Code through the Model Context Protocol (MCP).
 
 ![Downloads](https://img.shields.io/endpoint?url=https://openbeans.org/plugin-counter/api/118)
@@ -175,7 +177,7 @@ mvn clean package
 
 ## Contributing
 
-Due to my current job situation, I'm no longer able to actively contribute to this project. However, contributions from the community are very welcome! Feel free to:
+Contributions are very welcome! Feel free to:
 
 1. Fork the repository
 2. Create a feature branch
