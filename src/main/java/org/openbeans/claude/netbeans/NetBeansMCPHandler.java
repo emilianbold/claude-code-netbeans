@@ -156,8 +156,10 @@ public class NetBeansMCPHandler {
             
             return objectMapper.writeValueAsString(response);
             
+        } catch (IllegalArgumentException e) {
+            return responseBuilder.createErrorResponse(null, -32603, "Internal error", e.getMessage());
         } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Error handling MCP message", e);
+            LOGGER.log(Level.WARNING, "Error handling MCP message", e);
             return responseBuilder.createErrorResponse(null, -32603, "Internal error", e.getMessage());
         }
     }
@@ -309,9 +311,10 @@ public class NetBeansMCPHandler {
             // Sync response
             return responseBuilder.createToolResponse(result);
 
+        } catch (IllegalArgumentException e) {
+            return responseBuilder.createToolResponse("Error: " + e.getMessage());
         } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Error executing tool: " + toolName, e);
-            
+            LOGGER.log(Level.WARNING, "Error executing tool: " + toolName, e);
             return responseBuilder.createToolResponse("Error: " + e.getMessage());
         }
     }

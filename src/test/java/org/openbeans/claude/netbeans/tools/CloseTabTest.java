@@ -3,6 +3,7 @@ package org.openbeans.claude.netbeans.tools;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.openbeans.claude.netbeans.MCPResponseBuilder;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -41,5 +42,14 @@ public class CloseTabTest {
 
         // TAB_CLOSED is returned even when the tab is not found (user may have already closed it)
         assertEquals("{\"content\":[{\"type\":\"text\",\"text\":\"TAB_CLOSED\"}]}", objectMapper.writeValueAsString(n));
+    }
+
+    @Test
+    public void parseArguments_deserializesTabName() {
+        CloseTab tool = new CloseTab();
+        ObjectNode json = objectMapper.createObjectNode();
+        json.put("tab_name", "MyFile.java");  // schema generates snake_case JSON property
+        CloseTabParams params = tool.parseArguments(json);
+        assertEquals("MyFile.java", params.getTabName());
     }
 }

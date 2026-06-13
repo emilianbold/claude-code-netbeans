@@ -66,4 +66,35 @@ public class NetBeansMCPHandlerTest {
         assertTrue(prompts.size() > 0);
         assertEquals("code_review", prompts.get(0).get("name").asText());
     }
+
+    @Test
+    public void testHandleInitialize_withoutId_responseOmitsIdField() throws Exception {
+        // Notification-style: no "id" in request
+        String msg = "{\"jsonrpc\":\"2.0\",\"method\":\"initialize\",\"params\":{}}";
+        String response = handler.handleMessage(objectMapper.readTree(msg));
+        JsonNode json = objectMapper.readTree(response);
+        assertNull(json.get("id"));
+        assertNotNull(json.get("result"));
+    }
+
+    @Test
+    public void testHandleToolsCall_unknownTool_returnsErrorContent() throws Exception {
+        String msg = "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\","
+                + "\"params\":{\"name\":\"nonexistent_tool\",\"arguments\":{}}}";
+        String response = handler.handleMessage(objectMapper.readTree(msg));
+        JsonNode json = objectMapper.readTree(response);
+        // Unknown tool name is caught inside handleToolsCall; error is returned as MCP text content
+        String text = json.get("result").get("content").get(0).get("text").asText();
+        assertTrue(text.startsWith("Error:"), "Expected error text, got: " + text);
+    }
+
+    @Test
+    public void testHandleResourcesRead_unknownUri_returnsInternalError() throws Exception {
+        String msg = "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"resources/read\","
+                + "\"params\":{\"uri\":\"unknown://something\"}}";
+        String response = handler.handleMessage(objectMapper.readTree(msg));
+        JsonNode json = objectMapper.readTree(response);
+        assertNotNull(json.get("error"));
+        assertEquals(-32603, json.get("error").get("code").asInt());
+    }
 }
