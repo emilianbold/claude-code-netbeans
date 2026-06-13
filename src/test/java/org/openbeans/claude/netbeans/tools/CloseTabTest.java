@@ -27,4 +27,19 @@ public class CloseTabTest {
         // Note the full JSON response is: { "result" : n, "jsonrpc" : "2.0","id" : <someID> }
         assertEquals("{\"content\":[{\"type\":\"text\",\"text\":\"TAB_CLOSED\"}]}", objectMapper.writeValueAsString(n));
     }
+
+    @Test
+    public void testJSONResponse_tabNotFound() throws Exception {
+        CloseTab tool = new CloseTab() {
+            @Override
+            boolean closeTopComponent(String tabName) {
+                return false;
+            }
+        };
+
+        JsonNode n = responseBuilder.createToolResponse(tool.run(new CloseTabParams("missing tab")));
+
+        // TAB_CLOSED is returned even when the tab is not found (user may have already closed it)
+        assertEquals("{\"content\":[{\"type\":\"text\",\"text\":\"TAB_CLOSED\"}]}", objectMapper.writeValueAsString(n));
+    }
 }

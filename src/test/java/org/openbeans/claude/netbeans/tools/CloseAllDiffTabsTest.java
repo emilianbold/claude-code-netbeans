@@ -28,4 +28,18 @@ public class CloseAllDiffTabsTest {
         // Note the full JSON response is: { "result" : n, "jsonrpc" : "2.0","id" : <someID> }
         assertEquals("{\"content\":[{\"type\":\"text\",\"text\":\"CLOSED_1_DIFF_TABS\"}]}", objectMapper.writeValueAsString(n));
     }
+
+    @Test
+    public void testJSONResponse_noTabsClosed() throws JsonProcessingException {
+        CloseAllDiffTabs tool = new CloseAllDiffTabs() {
+            @Override
+            int closeAllDiffTabs() {
+                return 0;
+            }
+        };
+
+        JsonNode n = responseBuilder.createToolResponse(tool.run(new CloseAllDiffTabsParams()));
+
+        assertEquals("{\"content\":[{\"type\":\"text\",\"text\":\"CLOSED_0_DIFF_TABS\"}]}", objectMapper.writeValueAsString(n));
+    }
 }
