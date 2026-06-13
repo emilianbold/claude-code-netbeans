@@ -78,7 +78,7 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
     /**
      * Creates a Diagnostic object from annotation data.
      */
-    private Diagnostic createDiagnostic(String message, String severity, String source,
+    Diagnostic createDiagnostic(String message, String severity, String source,
                                       String code, int line, int column) {
         Diagnostic diagnostic = new Diagnostic();
         diagnostic.setMessage(message);
@@ -247,7 +247,7 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
     /**
      * Converts a NetBeans AnnotationDesc to a Diagnostic object.
      */
-    private Diagnostic convertAnnotationToDiagnostic(AnnotationDesc annotation,
+    Diagnostic convertAnnotationToDiagnostic(AnnotationDesc annotation,
                                                    int lineNumber, int columnNumber) {
         if (annotation == null) {
             return null;

@@ -324,7 +324,7 @@ public class NetBeansMCPHandler {
      * @param requestId The original request ID
      * @param result The tool result to send
      */
-    private void sendAsyncToolResponse(Integer requestId, Object result) {
+    void sendAsyncToolResponse(Integer requestId, Object result) {
         try {
             if (webSocketSession == null || !webSocketSession.isOpen()) {
                 LOGGER.warning("Cannot send async response - WebSocket not open");
@@ -586,7 +586,7 @@ public class NetBeansMCPHandler {
     /**
      * Handles a diff tab being closed, sending the async response.
      */
-    private void handleDiffTabClosed(String tabName) {
+    void handleDiffTabClosed(String tabName) {
         AsyncHandler handler = DiffTabTracker.remove(tabName);
         if (handler != null) {
             LOGGER.log(Level.INFO, "Diff tab closed: {0}", tabName);

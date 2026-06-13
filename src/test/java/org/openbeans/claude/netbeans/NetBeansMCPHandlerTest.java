@@ -2,7 +2,12 @@ package org.openbeans.claude.netbeans;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import org.eclipse.jetty.websocket.api.Session;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import static org.junit.jupiter.api.Assertions.*;
 
 public class NetBeansMCPHandlerTest {
@@ -96,5 +101,190 @@ public class NetBeansMCPHandlerTest {
         JsonNode json = objectMapper.readTree(response);
         assertNotNull(json.get("error"));
         assertEquals(-32603, json.get("error").get("code").asInt());
+    }
+
+    @Test
+    public void testHandleToolsList_containsAllExpectedToolNames() throws Exception {
+        String msg = "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"tools/list\",\"params\":{}}";
+        JsonNode tools = objectMapper.readTree(handler.handleMessage(objectMapper.readTree(msg)))
+                .get("result").get("tools");
+        Set<String> names = new HashSet<>();
+        tools.forEach(t -> names.add(t.get("name").asText()));
+        for (String expected : List.of("openFile", "getWorkspaceFolders", "getOpenEditors",
+                "getCurrentSelection", "close_tab", "getDiagnostics",
+                "checkDocumentDirty", "saveDocument", "closeAllDiffTabs", "openDiff")) {
+            assertTrue(names.contains(expected), "Missing tool: " + expected);
+        }
+    }
+
+    @Test
+    public void testHandleResourcesList_returnsValidJson() throws Exception {
+        String msg = "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"resources/list\",\"params\":{}}";
+        String response = handler.handleMessage(objectMapper.readTree(msg));
+        JsonNode json = objectMapper.readTree(response);
+        assertTrue(json.has("result") || json.has("error"), "Expected result or error");
+    }
+
+    @Test
+    public void testHandleToolsCall_getDiagnostics_returnsEmptyArray() throws Exception {
+        String msg = "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"tools/call\","
+                + "\"params\":{\"name\":\"getDiagnostics\",\"arguments\":{}}}";
+        String response = handler.handleMessage(objectMapper.readTree(msg));
+        JsonNode json = objectMapper.readTree(response);
+        assertEquals("[]", json.get("result").asText());
+    }
+
+    @Test
+    public void testHandleToolsCall_getCurrentSelection_returnsEmptySelection() throws Exception {
+        String msg = "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"tools/call\","
+                + "\"params\":{\"name\":\"getCurrentSelection\",\"arguments\":{}}}";
+        String response = handler.handleMessage(objectMapper.readTree(msg));
+        JsonNode json = objectMapper.readTree(response);
+        JsonNode result = json.get("result");
+        assertTrue(result.get("isEmpty").asBoolean());
+        assertEquals("", result.get("text").asText());
+    }
+
+    @Test
+    public void testSetWebSocketSession_null_doesNotThrow() {
+        // Exercises stopSelectionTracking() and stopDiffTabTracking() with nothing to clean up
+        assertDoesNotThrow(() -> new NetBeansMCPHandler().setWebSocketSession(null));
+    }
+
+    @Test
+    public void testSetWebSocketSession_nonNullThenNull_coversStartAndStopTracking() {
+        // Calling with non-null → startSelectionTracking() + startDiffTabTracking() (adds listeners)
+        // Calling with null → stopSelectionTracking() + stopDiffTabTracking() (removes listeners)
+        Session mockSession = Mockito.mock(Session.class);
+        NetBeansMCPHandler h = new NetBeansMCPHandler();
+        assertDoesNotThrow(() -> h.setWebSocketSession(mockSession));
+        assertDoesNotThrow(() -> h.setWebSocketSession(null));
+    }
+
+    @Test
+    public void testHandleResourcesRead_projectUri_returnsInternalError() throws Exception {
+        // project:// URI triggers getProjectInfo() -> FileUtil.toFileObject() returns null -> IAE
+        String msg = "{\"jsonrpc\":\"2.0\",\"id\":20,\"method\":\"resources/read\","
+                + "\"params\":{\"uri\":\"project:///nonexistent_xyz_abc\"}}";
+        String response = handler.handleMessage(objectMapper.readTree(msg));
+        JsonNode json = objectMapper.readTree(response);
+        assertNotNull(json.get("error"));
+        assertEquals(-32603, json.get("error").get("code").asInt());
+    }
+
+    @Test
+    public void testHandleToolsCall_closeTab_realRegistry_returnsTabClosed() throws Exception {
+        // Exercises real findTopComponent() against empty NB registry
+        String msg = "{\"jsonrpc\":\"2.0\",\"id\":21,\"method\":\"tools/call\","
+                + "\"params\":{\"name\":\"close_tab\",\"arguments\":{\"tab_name\":\"SomeFile.java\"}}}";
+        String response = handler.handleMessage(objectMapper.readTree(msg));
+        JsonNode json = objectMapper.readTree(response);
+        assertNotNull(json.get("result"));
+        String text = json.get("result").get("content").get(0).get("text").asText();
+        assertEquals("TAB_CLOSED", text);
+    }
+
+    @Test
+    public void testHandleToolsCall_closeAllDiffTabs_realRegistry_returnsClosed() throws Exception {
+        // Exercises real closeAllDiffTabs() loop against empty NB registry
+        String msg = "{\"jsonrpc\":\"2.0\",\"id\":22,\"method\":\"tools/call\","
+                + "\"params\":{\"name\":\"closeAllDiffTabs\",\"arguments\":{}}}";
+        String response = handler.handleMessage(objectMapper.readTree(msg));
+        JsonNode json = objectMapper.readTree(response);
+        assertNotNull(json.get("result"));
+        String text = json.get("result").get("content").get(0).get("text").asText();
+        assertEquals("CLOSED_0_DIFF_TABS", text);
+    }
+
+    @Test
+    public void testHandleToolsCall_checkDocumentDirty_outsideProjects_returnsResult() throws Exception {
+        String msg = "{\"jsonrpc\":\"2.0\",\"id\":23,\"method\":\"tools/call\","
+                + "\"params\":{\"name\":\"checkDocumentDirty\",\"arguments\":{\"filePath\":\"/tmp/test.java\"}}}";
+        String response = handler.handleMessage(objectMapper.readTree(msg));
+        JsonNode json = objectMapper.readTree(response);
+        assertNotNull(json.get("result"));
+        assertFalse(json.get("result").get("isDirty").asBoolean());
+    }
+
+    @Test
+    public void testHandleToolsCall_getWorkspaceFolders_returnsValidJson() throws Exception {
+        String msg = "{\"jsonrpc\":\"2.0\",\"id\":24,\"method\":\"tools/call\","
+                + "\"params\":{\"name\":\"getWorkspaceFolders\",\"arguments\":{}}}";
+        String response = handler.handleMessage(objectMapper.readTree(msg));
+        JsonNode json = objectMapper.readTree(response);
+        assertNotNull(json.get("result"));
+    }
+
+    @Test
+    public void testHandleToolsCall_getOpenEditors_throughHandler_returnsEmptyEditors() throws Exception {
+        String msg = "{\"jsonrpc\":\"2.0\",\"id\":25,\"method\":\"tools/call\","
+                + "\"params\":{\"name\":\"getOpenEditors\",\"arguments\":{}}}";
+        String response = handler.handleMessage(objectMapper.readTree(msg));
+        JsonNode json = objectMapper.readTree(response);
+        JsonNode result = json.get("result");
+        assertNotNull(result.get("editors"));
+        assertTrue(result.get("editors").isArray());
+    }
+
+    @Test
+    public void testHandleDiffTabClosed_noTrackedHandler_doesNothing() {
+        // DiffTabTracker.remove("untracked") returns null -> method exits without calling sendResponse
+        assertDoesNotThrow(() -> handler.handleDiffTabClosed("untracked-tab-xyz"));
+    }
+
+    @Test
+    public void testHandleDiffTabClosed_withTrackedHandler_invokesHandler() {
+        String tabName = "TestDiff-" + System.nanoTime();
+        java.util.concurrent.atomic.AtomicBoolean called = new java.util.concurrent.atomic.AtomicBoolean(false);
+        org.openbeans.claude.netbeans.tools.DiffTabTracker.register(tabName, result -> called.set(true));
+
+        handler.handleDiffTabClosed(tabName);
+
+        assertTrue(called.get(), "Handler should have been invoked with DIFF_REJECTED result");
+    }
+
+    @Test
+    public void testSendAsyncToolResponse_nullSession_doesNotThrow() {
+        // webSocketSession is null -> logs warning and returns early
+        assertDoesNotThrow(() -> handler.sendAsyncToolResponse(1, "test result"));
+    }
+
+    @Test
+    public void testSendAsyncToolResponse_closedSession_doesNotThrow() throws Exception {
+        Session mockSession = Mockito.mock(Session.class);
+        Mockito.when(mockSession.isOpen()).thenReturn(false);
+        handler.setWebSocketSession(mockSession);
+        // Session not open -> logs warning and returns early
+        assertDoesNotThrow(() -> handler.sendAsyncToolResponse(2, "test result"));
+        handler.setWebSocketSession(null);
+    }
+
+    @Test
+    public void testSendAsyncToolResponse_openSession_sendsMessage() throws Exception {
+        Session mockSession = Mockito.mock(Session.class);
+        org.eclipse.jetty.websocket.api.RemoteEndpoint mockRemote =
+                Mockito.mock(org.eclipse.jetty.websocket.api.RemoteEndpoint.class);
+        Mockito.when(mockSession.isOpen()).thenReturn(true);
+        Mockito.when(mockSession.getRemote()).thenReturn(mockRemote);
+
+        handler.setWebSocketSession(mockSession);
+        handler.sendAsyncToolResponse(42, "async result");
+
+        Mockito.verify(mockRemote, Mockito.times(1)).sendString(Mockito.anyString());
+        handler.setWebSocketSession(null);
+    }
+
+    @Test
+    public void testHandleResourcesRead_projectUri_existingPath_returnsResultOrError() throws Exception {
+        // /tmp exists on Linux; FileUtil.toFileObject may return a FileObject or null
+        String msg = "{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"resources/read\","
+                + "\"params\":{\"uri\":\"project:///tmp\"}}";
+        String response = handler.handleMessage(objectMapper.readTree(msg));
+        JsonNode json = objectMapper.readTree(response);
+        // Both paths are valid: success (result with path) or error (NB FileUtil unavailable)
+        assertTrue(json.has("result") || json.has("error"));
+        if (json.has("result")) {
+            assertEquals("/tmp", json.get("result").get("path").asText());
+        }
     }
 }

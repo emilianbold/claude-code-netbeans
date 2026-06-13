@@ -37,4 +37,16 @@ public class NbUtilsTest {
         assertNull(data.filePath);
         assertFalse(data.isEmpty);
     }
+
+    @Test
+    public void isPathWithinOpenProjects_returnsFalse_forArbitraryPath() {
+        // No projects open in test environment -> always false
+        assertFalse(NbUtils.isPathWithinOpenProjects("/tmp/test.java"));
+    }
+
+    @Test
+    public void getCurrentSelectionData_returnsNull_whenNoEditorActive() {
+        // TopComponent.getRegistry().getActivated() returns null without NB
+        assertNull(NbUtils.getCurrentSelectionData());
+    }
 }

@@ -52,4 +52,10 @@ public class CloseTabTest {
         CloseTabParams params = tool.parseArguments(json);
         assertEquals("MyFile.java", params.getTabName());
     }
+
+    @Test
+    public void closeTopComponent_returnsFalse_withEmptyRegistry() {
+        // Exercises findTopComponent() with real (empty) NB TopComponent registry
+        assertFalse(new CloseTab().closeTopComponent("NonExistentTab.java"));
+    }
 }

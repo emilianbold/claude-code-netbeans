@@ -42,4 +42,10 @@ public class CloseAllDiffTabsTest {
 
         assertEquals("{\"content\":[{\"type\":\"text\",\"text\":\"CLOSED_0_DIFF_TABS\"}]}", objectMapper.writeValueAsString(n));
     }
+
+    @Test
+    public void closeAllDiffTabs_direct_returnsZero_withEmptyRegistry() {
+        // Exercises real closeAllDiffTabs() loop with NB registry returning empty set
+        assertEquals(0, new CloseAllDiffTabs().closeAllDiffTabs());
+    }
 }
