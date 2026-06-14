@@ -57,4 +57,9 @@ public class DiffTabTrackerTest {
         OpenDiffResult result = new OpenDiffResult(List.of(new Content("text", "FILE_SAVED")));
         assertDoesNotThrow(() -> DiffTabTracker.setResponse("no-such-tab-xyz", result));
     }
+
+    @Test
+    public void constructor_isInstantiable() {
+        assertNotNull(new DiffTabTracker());
+    }
 }

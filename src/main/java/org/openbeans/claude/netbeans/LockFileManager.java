@@ -107,13 +107,17 @@ public class LockFileManager {
     public void removeLockFile() {
         if (lockFileCreated && Files.exists(lockFilePath)) {
             try {
-                Files.delete(lockFilePath);
+                deletePath(lockFilePath);
                 lockFileCreated = false;
                 LOGGER.log(Level.INFO, "Removed Claude Code lock file");
             } catch (IOException e) {
                 LOGGER.log(Level.WARNING, "Failed to remove lock file", e);
             }
         }
+    }
+
+    protected void deletePath(Path path) throws IOException {
+        Files.delete(path);
     }
     
     /**

@@ -33,22 +33,34 @@ public class CheckDocumentDirty implements Tool<CheckDocumentDirtyParams, CheckD
         return CheckDocumentDirtyParams.class;
     }
 
+    protected boolean isPathAllowed(String filePath) {
+        return NbUtils.isPathWithinOpenProjects(filePath);
+    }
+
+    protected FileObject toFileObject(File file) {
+        return FileUtil.toFileObject(file);
+    }
+
+    protected DataObject findDataObject(FileObject fo) throws Exception {
+        return DataObject.find(fo);
+    }
+
     @Override
     public CheckDocumentDirtyResult run(CheckDocumentDirtyParams params) throws Exception {
         String filePath = params.getFilePath();
-        
+
         try {
             // Security check: Only allow checking files within open project directories
-            if (!NbUtils.isPathWithinOpenProjects(filePath)) {
+            if (!isPathAllowed(filePath)) {
                 throw new SecurityException("File access denied: Path is not within any open project directory: " + filePath);
             }
-            
+
             File file = new File(filePath);
-            FileObject fileObject = FileUtil.toFileObject(file);
-            
+            FileObject fileObject = toFileObject(file);
+
             if (fileObject != null) {
                 try {
-                    DataObject dataObject = DataObject.find(fileObject);
+                    DataObject dataObject = findDataObject(fileObject);
                     if (dataObject != null) {
                         boolean isDirty = dataObject.isModified();
 

@@ -604,7 +604,7 @@ public class NetBeansMCPHandler {
     /**
      * Tracks selection changes in the given TopComponent if it's an editor.
      */
-    private void trackEditorSelection(TopComponent tc) {
+    void trackEditorSelection(TopComponent tc) {
         try {
             Node[] nodes = tc.getActivatedNodes();
             if (nodes != null && nodes.length > 0) {
@@ -650,7 +650,7 @@ public class NetBeansMCPHandler {
     /**
      * Sends a selection_changed event to Claude Code via WebSocket.
      */
-    private void sendSelectionChangeEvent(JTextComponent textComponent, Node node) {
+    void sendSelectionChangeEvent(JTextComponent textComponent, Node node) {
         try {
             if (webSocketSession == null || !webSocketSession.isOpen()) {
                 return;

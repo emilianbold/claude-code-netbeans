@@ -1,9 +1,12 @@
 package org.openbeans.claude.netbeans;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+import static org.mockito.Mockito.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 public class MCPResponseBuilderTest {
@@ -95,5 +98,16 @@ public class MCPResponseBuilderTest {
         assertEquals("2.0", response.get("jsonrpc").asText());
         assertEquals(99, response.get("id").asInt());
         assertEquals("bar", response.get("result").get("foo").asText());
+    }
+
+    @Test
+    public void testCreateErrorResponse_objectMapperThrows_returnsFallback() throws Exception {
+        ObjectMapper spyMapper = Mockito.spy(new ObjectMapper());
+        doThrow(new JsonProcessingException("forced error") {}).when(spyMapper).writeValueAsString(any());
+        MCPResponseBuilder b = new MCPResponseBuilder(spyMapper);
+
+        String result = b.createErrorResponse(1, -32600, "msg", null);
+
+        assertTrue(result.contains("Internal error"));
     }
 }

@@ -32,25 +32,37 @@ public class OpenFile implements Tool<OpenFileParams, String> {
         return OpenFileParams.class;
     }
 
+    protected boolean isPathAllowed(String filePath) {
+        return NbUtils.isPathWithinOpenProjects(filePath);
+    }
+
+    protected FileObject toFileObject(File file) {
+        return FileUtil.toFileObject(file);
+    }
+
+    protected DataObject findDataObject(FileObject fo) throws Exception {
+        return DataObject.find(fo);
+    }
+
     @Override
     public String run(OpenFileParams params) throws Exception {
         String filePath = params.getFilePath();
         boolean preview = params.getPreview() != null ? params.getPreview() : false;
-        
+
         try {
             // Security check: Only allow opening files within open project directories
-            if (!NbUtils.isPathWithinOpenProjects(filePath)) {
+            if (!isPathAllowed(filePath)) {
                 throw new SecurityException("File open denied: Path is not within any open project directory: " + filePath);
             }
-            
+
             File file = new File(filePath);
             if (!file.exists()) {
                 throw new IllegalArgumentException("File does not exist: " + filePath);
             }
-            
-            FileObject fileObject = FileUtil.toFileObject(file);
+
+            FileObject fileObject = toFileObject(file);
             if (fileObject != null) {
-                DataObject dataObject = DataObject.find(fileObject);
+                DataObject dataObject = findDataObject(fileObject);
                 EditorCookie editorCookie = dataObject.getLookup().lookup(EditorCookie.class);
                 
                 if (editorCookie != null) {

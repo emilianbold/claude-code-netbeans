@@ -2,6 +2,7 @@ package org.openbeans.claude.netbeans.tools;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.logging.Logger;
 import org.openbeans.claude.netbeans.tools.params.CloseTabParams;
 import org.openbeans.claude.netbeans.tools.params.CloseTabResult;
@@ -32,9 +33,13 @@ public class CloseTab implements Tool<CloseTabParams, CloseTabResult> {
         return CloseTabParams.class;
     }
 
+    protected Set<TopComponent> getOpenTopComponents() {
+        return TopComponent.getRegistry().getOpened();
+    }
+
     private TopComponent findTopComponent(String tabName) {
         // Find the TopComponent by tab name
-        for (TopComponent tc : TopComponent.getRegistry().getOpened()) {
+        for (TopComponent tc : getOpenTopComponents()) {
             String displayName = tc.getDisplayName();
             if (displayName != null && displayName.equals(tabName)) {
                 return tc;
@@ -42,7 +47,7 @@ public class CloseTab implements Tool<CloseTabParams, CloseTabResult> {
         }
 
         // If no exact match found, try to find by file name (without path)
-        for (TopComponent tc : TopComponent.getRegistry().getOpened()) {
+        for (TopComponent tc : getOpenTopComponents()) {
             Node[] nodes = tc.getActivatedNodes();
             if (nodes != null && nodes.length > 0) {
                 DataObject dataObject = nodes[0].getLookup().lookup(DataObject.class);

@@ -49,4 +49,9 @@ public class NbUtilsTest {
         // TopComponent.getRegistry().getActivated() returns null without NB
         assertNull(NbUtils.getCurrentSelectionData());
     }
+
+    @Test
+    public void constructor_isInstantiable() {
+        assertNotNull(new NbUtils());
+    }
 }

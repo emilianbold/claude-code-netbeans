@@ -31,4 +31,34 @@ public class GetCurrentSelectionTest {
     public void getDescription() {
         assertFalse(new GetCurrentSelection().getDescription().isBlank());
     }
+
+    @Test
+    public void run_returnsSelectionData_whenGetSelectionDataReturnsNonNull() throws Exception {
+        NbUtils.SelectionData fakeSelection = new NbUtils.SelectionData("hello", "/test/File.java", 1, 0, 1, 5);
+        GetCurrentSelection tool = new GetCurrentSelection() {
+            @Override
+            protected NbUtils.SelectionData getSelectionData() { return fakeSelection; }
+        };
+
+        NbUtils.SelectionData result = tool.run(new GetCurrentSelectionParams());
+
+        assertSame(fakeSelection, result);
+        assertFalse(result.isEmpty);
+        assertEquals("hello", result.text);
+    }
+
+    @Test
+    public void run_returnsFallback_whenGetSelectionDataThrows() throws Exception {
+        GetCurrentSelection tool = new GetCurrentSelection() {
+            @Override
+            protected NbUtils.SelectionData getSelectionData() {
+                throw new RuntimeException("simulated NB failure");
+            }
+        };
+
+        NbUtils.SelectionData result = tool.run(new GetCurrentSelectionParams());
+
+        assertNotNull(result);
+        assertTrue(result.isEmpty);
+    }
 }

@@ -29,6 +29,18 @@ public class SaveDocument implements Tool<SaveDocumentParams, SaveDocumentResult
         return SaveDocumentParams.class;
     }
 
+    protected boolean isPathAllowed(String filePath) {
+        return NbUtils.isPathWithinOpenProjects(filePath);
+    }
+
+    protected FileObject toFileObject(File file) {
+        return FileUtil.toFileObject(file);
+    }
+
+    protected DataObject findDataObject(FileObject fo) throws DataObjectNotFoundException {
+        return DataObject.find(fo);
+    }
+
     /**
      * Saves a document to disk.
      */
@@ -37,17 +49,17 @@ public class SaveDocument implements Tool<SaveDocumentParams, SaveDocumentResult
         String filePath = saveParams.getFilePath();
 
         // Security check: Only allow saving files within open project directories
-        if (!NbUtils.isPathWithinOpenProjects(filePath)) {
+        if (!isPathAllowed(filePath)) {
             throw new SecurityException("File save denied: Path is not within any open project directory: " + filePath);
         }
 
         File file = new File(filePath);
-        FileObject fileObject = FileUtil.toFileObject(file);
+        FileObject fileObject = toFileObject(file);
 
         if (fileObject == null) {
             throw new FileNotFoundException(filePath);
         }
-        DataObject dataObject = DataObject.find(fileObject);
+        DataObject dataObject = findDataObject(fileObject);
         if (dataObject == null) {
             // not really possible as find would throw DataObjectNotFoundException
             throw new NullPointerException("dataObject");

@@ -2,6 +2,7 @@ package org.openbeans.claude.netbeans.tools;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.openbeans.claude.netbeans.tools.params.CloseAllDiffTabsParams;
@@ -28,11 +29,19 @@ public class CloseAllDiffTabs implements Tool<CloseAllDiffTabsParams, CloseAllDi
         return CloseAllDiffTabsParams.class;
     }
 
+    protected Set<TopComponent> getOpenTopComponents() {
+        return TopComponent.getRegistry().getOpened();
+    }
+
+    protected String getSimpleClassName(TopComponent tc) {
+        return tc.getClass().getSimpleName();
+    }
+
     /* package protected */ int closeAllDiffTabs() {
         int closedCount = 0;
 
         // Get all open TopComponents and look for diff viewers
-        for (TopComponent tc : TopComponent.getRegistry().getOpened()) {
+        for (TopComponent tc : getOpenTopComponents()) {
             String displayName = tc.getDisplayName();
             String name = tc.getName();
 
@@ -50,7 +59,7 @@ public class CloseAllDiffTabs implements Tool<CloseAllDiffTabsParams, CloseAllDi
             }
 
             // Also check by class name for known diff viewer classes
-            String className = tc.getClass().getSimpleName();
+            String className = getSimpleClassName(tc);
             if (className.toLowerCase().contains("diff")
                     || className.toLowerCase().contains("compare")) {
                 try {
