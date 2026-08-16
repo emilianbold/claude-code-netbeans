@@ -28,10 +28,14 @@ public class GetCurrentSelection implements Tool<GetCurrentSelectionParams, NbUt
     }
 
 
+    protected NbUtils.SelectionData getSelectionData() {
+        return NbUtils.getCurrentSelectionData();
+    }
+
     @Override
     public NbUtils.SelectionData run(GetCurrentSelectionParams params) throws Exception {
         try {
-            NbUtils.SelectionData selectionData = NbUtils.getCurrentSelectionData();
+            NbUtils.SelectionData selectionData = getSelectionData();
             if (selectionData != null) {
                 return selectionData;
             } else {

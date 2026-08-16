@@ -78,7 +78,7 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
     /**
      * Creates a Diagnostic object from annotation data.
      */
-    private Diagnostic createDiagnostic(String message, String severity, String source,
+    Diagnostic createDiagnostic(String message, String severity, String source,
                                       String code, int line, int column) {
         Diagnostic diagnostic = new Diagnostic();
         diagnostic.setMessage(message);
@@ -115,6 +115,10 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
         return diagnostic;
     }
     
+    protected boolean isPathAllowed(String filePath) {
+        return NbUtils.isPathWithinOpenProjects(filePath);
+    }
+
     /**
      * Extracts diagnostic information from NetBeans annotations for a specific file.
      */
@@ -122,9 +126,9 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
         try {
             // Convert URI to file path
             String filePath = uri.startsWith("file://") ? uri.substring(7) : uri;
-            
+
             // Security check: Only allow files within open projects
-            if (!NbUtils.isPathWithinOpenProjects(filePath)) {
+            if (!isPathAllowed(filePath)) {
                 throw new SecurityException("File access denied: Path is not within any open project directory: " + filePath);
             }
             
@@ -143,22 +147,30 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
         }
     }
     
+    protected java.util.Set<TopComponent> getOpenTopComponents() {
+        return TopComponent.getRegistry().getOpened();
+    }
+
+    protected File fileObjectToFile(FileObject fo) {
+        return FileUtil.toFile(fo);
+    }
+
     /**
      * Gets diagnostics for all currently open files.
      */
     private List<DiagnosticsResponse> getDiagnosticsForAllFiles() {
         try {
             List<DiagnosticsResponse> allResponses = new ArrayList<>();
-            
+
             // Go through all open TopComponents (editor tabs)
-            for (TopComponent tc : TopComponent.getRegistry().getOpened()) {
+            for (TopComponent tc : getOpenTopComponents()) {
                 Node[] nodes = tc.getActivatedNodes();
                 if (nodes != null && nodes.length > 0) {
                     DataObject dataObject = nodes[0].getLookup().lookup(DataObject.class);
                     if (dataObject != null) {
                         FileObject fileObject = dataObject.getPrimaryFile();
                         if (fileObject != null) {
-                            File file = FileUtil.toFile(fileObject);
+                            File file = fileObjectToFile(fileObject);
                             if (file != null) {
                                 List<Diagnostic> fileDiagnostics = extractDiagnosticsFromFile(file.getAbsolutePath());
                                 if (!fileDiagnostics.isEmpty()) {
@@ -184,7 +196,7 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
     /**
      * Extracts diagnostic information from a specific file using NetBeans editor annotations.
      */
-    private List<Diagnostic> extractDiagnosticsFromFile(String filePath) {
+    List<Diagnostic> extractDiagnosticsFromFile(String filePath) {
         List<Diagnostic> diagnostics = new ArrayList<>();
         
         try {
@@ -247,7 +259,7 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
     /**
      * Converts a NetBeans AnnotationDesc to a Diagnostic object.
      */
-    private Diagnostic convertAnnotationToDiagnostic(AnnotationDesc annotation,
+    Diagnostic convertAnnotationToDiagnostic(AnnotationDesc annotation,
                                                    int lineNumber, int columnNumber) {
         if (annotation == null) {
             return null;

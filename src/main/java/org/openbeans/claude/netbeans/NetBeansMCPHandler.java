@@ -156,8 +156,10 @@ public class NetBeansMCPHandler {
             
             return objectMapper.writeValueAsString(response);
             
+        } catch (IllegalArgumentException e) {
+            return responseBuilder.createErrorResponse(null, -32603, "Internal error", e.getMessage());
         } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Error handling MCP message", e);
+            LOGGER.log(Level.WARNING, "Error handling MCP message", e);
             return responseBuilder.createErrorResponse(null, -32603, "Internal error", e.getMessage());
         }
     }
@@ -309,9 +311,10 @@ public class NetBeansMCPHandler {
             // Sync response
             return responseBuilder.createToolResponse(result);
 
+        } catch (IllegalArgumentException e) {
+            return responseBuilder.createToolResponse("Error: " + e.getMessage());
         } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Error executing tool: " + toolName, e);
-            
+            LOGGER.log(Level.WARNING, "Error executing tool: " + toolName, e);
             return responseBuilder.createToolResponse("Error: " + e.getMessage());
         }
     }
@@ -321,7 +324,7 @@ public class NetBeansMCPHandler {
      * @param requestId The original request ID
      * @param result The tool result to send
      */
-    private void sendAsyncToolResponse(Integer requestId, Object result) {
+    void sendAsyncToolResponse(Integer requestId, Object result) {
         try {
             if (webSocketSession == null || !webSocketSession.isOpen()) {
                 LOGGER.warning("Cannot send async response - WebSocket not open");
@@ -583,7 +586,7 @@ public class NetBeansMCPHandler {
     /**
      * Handles a diff tab being closed, sending the async response.
      */
-    private void handleDiffTabClosed(String tabName) {
+    void handleDiffTabClosed(String tabName) {
         AsyncHandler handler = DiffTabTracker.remove(tabName);
         if (handler != null) {
             LOGGER.log(Level.INFO, "Diff tab closed: {0}", tabName);
@@ -601,7 +604,7 @@ public class NetBeansMCPHandler {
     /**
      * Tracks selection changes in the given TopComponent if it's an editor.
      */
-    private void trackEditorSelection(TopComponent tc) {
+    void trackEditorSelection(TopComponent tc) {
         try {
             Node[] nodes = tc.getActivatedNodes();
             if (nodes != null && nodes.length > 0) {
@@ -647,7 +650,7 @@ public class NetBeansMCPHandler {
     /**
      * Sends a selection_changed event to Claude Code via WebSocket.
      */
-    private void sendSelectionChangeEvent(JTextComponent textComponent, Node node) {
+    void sendSelectionChangeEvent(JTextComponent textComponent, Node node) {
         try {
             if (webSocketSession == null || !webSocketSession.isOpen()) {
                 return;

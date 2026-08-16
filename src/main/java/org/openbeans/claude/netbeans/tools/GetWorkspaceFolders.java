@@ -32,23 +32,17 @@ public class GetWorkspaceFolders implements Tool<GetWorkspaceFoldersParams, GetW
         return GetWorkspaceFoldersParams.class;
     }
 
-    /**
-     * Data class to hold project information.
-     */
-    private static class ProjectData {
+    static class ProjectData {
         final String path;
         final String displayName;
-        
+
         ProjectData(String path, String displayName) {
             this.path = path;
             this.displayName = displayName;
         }
     }
-    
-    /**
-     * Retrieves project data from NetBeans Platform.
-     */
-    private List<ProjectData> getOpenProjectsData() {
+
+    List<ProjectData> getOpenProjectsData() {
         List<ProjectData> projectDataList = new ArrayList<>();
         Project[] openProjects = OpenProjects.getDefault().getOpenProjects();
         

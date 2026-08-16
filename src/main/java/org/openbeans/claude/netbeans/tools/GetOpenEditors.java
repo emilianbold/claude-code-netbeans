@@ -41,6 +41,18 @@ public class GetOpenEditors implements Tool<GetOpenEditorsParams, GetOpenEditors
     }
 
 
+    protected Node[] getCurrentNodes() {
+        return TopComponent.getRegistry().getCurrentNodes();
+    }
+
+    protected void setEditorProjectInfo(Editor editor, FileObject fo) {
+        Project owner = FileOwnerQuery.getOwner(fo);
+        if (owner != null) {
+            editor.setProjectName(ProjectUtils.getInformation(owner).getDisplayName());
+            editor.setProjectPath(owner.getProjectDirectory().getPath());
+        }
+    }
+
     @Override
     public GetOpenEditorsResult run(GetOpenEditorsParams params) throws Exception {
         GetOpenEditorsResult result = new GetOpenEditorsResult();
@@ -48,7 +60,7 @@ public class GetOpenEditors implements Tool<GetOpenEditorsParams, GetOpenEditors
 
         try {
             // Use TopComponent registry to get open editor nodes
-            Node[] nodes = TopComponent.getRegistry().getCurrentNodes();
+            Node[] nodes = getCurrentNodes();
             for (Node node : nodes) {
                 EditorCookie editorCookie = node.getLookup().lookup(EditorCookie.class);
                 if (editorCookie != null) {
@@ -62,13 +74,7 @@ public class GetOpenEditors implements Tool<GetOpenEditorsParams, GetOpenEditors
                             editor.setExtension(fileObject.getExt());
                             editor.setMimeType(fileObject.getMIMEType());
 
-                            // Get the project owner using FileOwnerQuery
-                            Project owner = FileOwnerQuery.getOwner(fileObject);
-                            if (owner != null) {
-                                editor.setProjectName(ProjectUtils.getInformation(owner).getDisplayName());
-                                editor.setProjectPath(owner.getProjectDirectory().getPath());
-                            }
-
+                            setEditorProjectInfo(editor, fileObject);
                             editors.add(editor);
                         }
                     }
