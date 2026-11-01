@@ -24,6 +24,8 @@ import org.openbeans.claude.netbeans.NbUtils;
 import org.openbeans.claude.netbeans.tools.params.Content;
 import org.openbeans.claude.netbeans.tools.params.OpenDiffParams;
 import org.openbeans.claude.netbeans.tools.params.OpenDiffResult;
+import org.openide.filesystems.FileObject;
+import org.openide.filesystems.FileUtil;
 import org.openide.util.Lookup;
 import org.openide.windows.TopComponent;
 
@@ -183,8 +185,10 @@ public class OpenDiff implements Tool<OpenDiffParams, AsyncResponse<OpenDiffResu
         }
 
         DiffView diffView = diffService.createDiff(
-                source(new File(contents.oldPath()).getName() + " (original)", contents.oldPath(), contents.oldText()),
-                source(new File(contents.newPath()).getName() + " (modified)", contents.newPath(), contents.newText()));
+                source(new File(contents.oldPath()).getName() + " (original)", contents.oldPath(),
+                        mimeTypeFor(contents.oldPath()), contents.oldText()),
+                source(new File(contents.newPath()).getName() + " (modified)", contents.newPath(),
+                        mimeTypeFor(contents.newPath()), contents.newText()));
         if (diffView == null) {
             LOGGER.warning("Failed to create diff view - diffView is null");
             handler.sendResponse(errorResult("Failed to create diff view"));
@@ -244,7 +248,29 @@ public class OpenDiff implements Tool<OpenDiffParams, AsyncResponse<OpenDiffResu
         diffTC.requestActive();
     }
 
-    private static StreamSource source(String name, String title, String text) {
+    /**
+     * Determines the MIME type used for syntax highlighting in the diff.
+     * Files that do not exist yet are resolved by name alone.
+     *
+     * @param path the file path
+     * @return the MIME type, {@code text/plain} if unknown
+     */
+    static String mimeTypeFor(String path) {
+        File file = new File(path);
+        String mime = null;
+        try {
+            FileObject fo = file.exists() ? FileUtil.toFileObject(FileUtil.normalizeFile(file)) : null;
+            if (fo == null) {
+                fo = FileUtil.createMemoryFileSystem().getRoot().createData(file.getName());
+            }
+            mime = fo.getMIMEType();
+        } catch (IOException | IllegalArgumentException e) {
+            LOGGER.log(Level.FINE, "Cannot determine MIME type of " + path, e);
+        }
+        return (mime == null || "content/unknown".equals(mime)) ? "text/plain" : mime;
+    }
+
+    private static StreamSource source(String name, String title, String mimeType, String text) {
         return new StreamSource() {
             @Override
             public String getName() {
@@ -258,7 +284,7 @@ public class OpenDiff implements Tool<OpenDiffParams, AsyncResponse<OpenDiffResu
 
             @Override
             public String getMIMEType() {
-                return "text/plain";
+                return mimeType;
             }
 
             @Override

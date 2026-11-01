@@ -82,4 +82,12 @@ public class OpenDiffTest {
         assertTrue(status.startsWith("File access denied"), status);
         assertTrue(result[0].getIsError());
     }
+
+    @Test
+    public void unknownFileTypesFallBackToPlainText() throws Exception {
+        assertEquals("text/plain", OpenDiff.mimeTypeFor(project.resolve("Nothing.unknownext").toString()));
+        Path existing = project.resolve("data.unknownext");
+        Files.writeString(existing, "x");
+        assertEquals("text/plain", OpenDiff.mimeTypeFor(existing.toString()));
+    }
 }
