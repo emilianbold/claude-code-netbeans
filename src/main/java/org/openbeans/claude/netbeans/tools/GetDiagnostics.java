@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.swing.text.Document;
+import javax.swing.text.Element;
+import javax.swing.text.StyledDocument;
 import org.netbeans.editor.AnnotationDesc;
 import org.netbeans.editor.Annotations;
 import org.openbeans.claude.netbeans.NbUtils;
@@ -79,7 +81,7 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
      * Creates a Diagnostic object from annotation data.
      */
     private Diagnostic createDiagnostic(String message, String severity, String source,
-                                      String code, int line, int column) {
+                                      String code, Range range) {
         Diagnostic diagnostic = new Diagnostic();
         diagnostic.setMessage(message);
 
@@ -97,22 +99,52 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
         diagnostic.setSource(source);
         diagnostic.setCode(code);
 
-        // Create range (convert to 0-based line numbers)
-        Start start = new Start();
-        start.setLine(line - 1);
-        start.setCharacter(column);
-
-        End end = new End();
-        end.setLine(line - 1);
-        end.setCharacter(column);
-
-        Range range = new Range();
-        range.setStart(start);
-        range.setEnd(end);
-
         diagnostic.setRange(range);
 
         return diagnostic;
+    }
+    
+    /**
+     * Computes the zero-based range of an annotation. Annotations covering a
+     * whole line (negative length) span to the end of that line; if the
+     * offset is unusable, the start of the given line is used.
+     *
+     * @param doc the document
+     * @param offset annotation start offset
+     * @param length annotation length, negative for the whole line
+     * @param fallbackLine zero-based line to use when the offset is invalid
+     * @return the range
+     */
+    static Range rangeOf(Document doc, int offset, int length, int fallbackLine) {
+        if (!(doc instanceof StyledDocument) || offset < 0 || offset > doc.getLength()) {
+            return range(fallbackLine, 0, fallbackLine, 0);
+        }
+        StyledDocument styled = (StyledDocument) doc;
+        int endOffset;
+        if (length < 0) {
+            Element root = doc.getDefaultRootElement();
+            Element line = root.getElement(root.getElementIndex(offset));
+            endOffset = Math.max(offset, line.getEndOffset() - 1);
+        } else {
+            endOffset = offset + length;
+        }
+        endOffset = Math.min(endOffset, doc.getLength());
+        NbUtils.Position start = NbUtils.position(styled, offset);
+        NbUtils.Position end = NbUtils.position(styled, endOffset);
+        return range(start.line, start.character, end.line, end.character);
+    }
+
+    private static Range range(int startLine, int startChar, int endLine, int endChar) {
+        Start start = new Start();
+        start.setLine(startLine);
+        start.setCharacter(startChar);
+        End end = new End();
+        end.setLine(endLine);
+        end.setCharacter(endChar);
+        Range range = new Range();
+        range.setStart(start);
+        range.setEnd(end);
+        return range;
     }
     
     /**
@@ -211,7 +243,7 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
                                     AnnotationDesc activeAnnotation = annotations.getActiveAnnotation(currentLine);
                                     if (activeAnnotation != null) {
                                         Diagnostic diagnostic = convertAnnotationToDiagnostic(
-                                            activeAnnotation, currentLine + 1, 0);
+                                            activeAnnotation, doc, currentLine);
                                         if (diagnostic != null) {
                                             diagnostics.add(diagnostic);
                                         }
@@ -222,7 +254,7 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
                                     if (passiveAnnotations != null) {
                                         for (AnnotationDesc annotation : passiveAnnotations) {
                                             Diagnostic diagnostic = convertAnnotationToDiagnostic(
-                                                annotation, currentLine + 1, 0);
+                                                annotation, doc, currentLine);
                                             if (diagnostic != null) {
                                                 diagnostics.add(diagnostic);
                                             }
@@ -248,7 +280,7 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
      * Converts a NetBeans AnnotationDesc to a Diagnostic object.
      */
     private Diagnostic convertAnnotationToDiagnostic(AnnotationDesc annotation,
-                                                   int lineNumber, int columnNumber) {
+                                                   Document doc, int line) {
         if (annotation == null) {
             return null;
         }
@@ -287,6 +319,7 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
             }
         }
         
-        return createDiagnostic(message, severity, source, code, lineNumber, columnNumber);
+        return createDiagnostic(message, severity, source, code,
+                rangeOf(doc, annotation.getOffset(), annotation.getLength(), line));
     }
 }

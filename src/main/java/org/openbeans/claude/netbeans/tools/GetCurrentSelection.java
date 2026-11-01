@@ -35,11 +35,11 @@ public class GetCurrentSelection implements Tool<GetCurrentSelectionParams, NbUt
             if (selectionData != null) {
                 return selectionData;
             } else {
-                return new NbUtils.SelectionData("", "", 0, 0, 0, 0);
+                return NbUtils.SelectionData.none("No active editor found");
             }
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Error getting current selection", e);
-            return new NbUtils.SelectionData("", "", 0, 0, 0, 0);
+            return NbUtils.SelectionData.none("Error getting current selection: " + e.getMessage());
         }
     }
 }

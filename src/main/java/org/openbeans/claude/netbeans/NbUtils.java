@@ -13,6 +13,7 @@ import org.netbeans.api.project.Project;
 import org.netbeans.api.project.ui.OpenProjects;
 import org.openide.cookies.EditorCookie;
 import org.openide.filesystems.FileObject;
+import org.openide.filesystems.FileUtil;
 import org.openide.loaders.DataObject;
 import org.openide.nodes.Node;
 import org.openide.text.NbDocument;
@@ -21,38 +22,97 @@ import org.openide.windows.TopComponent;
 public class NbUtils {
     private static final Logger LOGGER = Logger.getLogger(NbUtils.class.getName());
 
+    /** A zero-based position in a document, as in LSP. */
+    public static class Position {
+        public final int line;
+        public final int character;
+
+        public Position(int line, int character) {
+            this.line = line;
+            this.character = character;
+        }
+    }
+
+    /** A selection range with zero-based positions. */
+    public static class Selection {
+        public final Position start;
+        public final Position end;
+        public final boolean isEmpty;
+
+        public Selection(Position start, Position end, boolean isEmpty) {
+            this.start = start;
+            this.end = end;
+            this.isEmpty = isEmpty;
+        }
+    }
+
     /**
-     * Data class to hold current text selection information from NetBeans.
+     * The current text selection, in the same shape as Claude Code's other IDE
+     * integrations use for both getCurrentSelection and selection_changed:
+     * { success, text, filePath, fileUrl, selection: { start, end, isEmpty } }.
+     * Lines and characters are zero-based.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class SelectionData {
 
+        public final boolean success;
         public final String text;
         public final String filePath;
-        public final int startLine;
-        public final int startColumn;
-        public final int endLine;
-        public final int endColumn;
-        public final boolean isEmpty;
+        public final String fileUrl;
+        public final Selection selection;
+        public final String message;
 
-        public SelectionData(String selectedText, String filePath,
-                int startLine, int startColumn,
-                int endLine, int endColumn) {
-            this.text = selectedText != null ? selectedText : "";
+        private SelectionData(boolean success, String text, String filePath, String fileUrl,
+                Selection selection, String message) {
+            this.success = success;
+            this.text = text;
             this.filePath = filePath;
-            this.startLine = startLine;
-            this.startColumn = startColumn;
-            this.endLine = endLine;
-            this.endColumn = endColumn;
-            this.isEmpty = selectedText == null || selectedText.isEmpty();
+            this.fileUrl = fileUrl;
+            this.selection = selection;
+            this.message = message;
         }
+
+        /**
+         * @param message why no selection is available
+         * @return a result signalling that there is no selection
+         */
+        public static SelectionData none(String message) {
+            return new SelectionData(false, null, null, null, null, message);
+        }
+
+        /**
+         * Reads the selection of a text component.
+         *
+         * @param textComponent the editor pane
+         * @param doc its document
+         * @param filePath absolute path of the file shown, may be null
+         * @return the selection data
+         */
+        public static SelectionData of(JTextComponent textComponent, StyledDocument doc, String filePath) {
+            String selectedText = textComponent.getSelectedText();
+            int startOffset = textComponent.getSelectionStart();
+            int endOffset = textComponent.getSelectionEnd();
+            boolean empty = selectedText == null || selectedText.isEmpty();
+            Selection selection = new Selection(position(doc, startOffset), position(doc, endOffset), empty);
+            return new SelectionData(true, empty ? "" : selectedText, filePath,
+                    filePath != null ? toFileUri(filePath) : null, selection, null);
+        }
+    }
+
+    /**
+     * @param doc a document
+     * @param offset an offset in it
+     * @return the zero-based line and character of the offset
+     */
+    public static Position position(StyledDocument doc, int offset) {
+        return new Position(NbDocument.findLineNumber(doc, offset), NbDocument.findLineColumn(doc, offset));
     }
 
     /**
      * Extracts current text selection data from NetBeans IDE.
      *
      * @return SelectionData object with selection information, or null if no
-     * selection
+     * editor is active
      */
     public static SelectionData getCurrentSelectionData() {
         // Get the current active editor
@@ -83,28 +143,20 @@ public class NbUtils {
             return null;
         }
 
-        StyledDocument doc = (StyledDocument) textComponent.getDocument();
-        String selectedText = textComponent.getSelectedText();
-        int selectionStart = textComponent.getSelectionStart();
-        int selectionEnd = textComponent.getSelectionEnd();
+        return SelectionData.of(textComponent, (StyledDocument) textComponent.getDocument(), filePathOf(nodes[0]));
+    }
 
-        // Get file path
-        String filePath = null;
-        DataObject dataObject = nodes[0].getLookup().lookup(DataObject.class);
-        if (dataObject != null) {
-            FileObject fileObject = dataObject.getPrimaryFile();
-            if (fileObject != null) {
-                filePath = fileObject.getPath();
-            }
+    /**
+     * @param node a node
+     * @return absolute path of the local file the node represents, or null
+     */
+    public static String filePathOf(Node node) {
+        DataObject dataObject = node.getLookup().lookup(DataObject.class);
+        if (dataObject == null || dataObject.getPrimaryFile() == null) {
+            return null;
         }
-
-        // Use NbDocument utility methods for line/column calculation
-        int startLine = NbDocument.findLineNumber(doc, selectionStart) + 1; // Convert to 1-based
-        int startColumn = NbDocument.findLineColumn(doc, selectionStart);
-        int endLine = NbDocument.findLineNumber(doc, selectionEnd) + 1; // Convert to 1-based
-        int endColumn = NbDocument.findLineColumn(doc, selectionEnd);
-
-        return new SelectionData(selectedText, filePath, startLine, startColumn, endLine, endColumn);
+        File file = FileUtil.toFile(dataObject.getPrimaryFile());
+        return file != null ? file.getAbsolutePath() : null;
     }
  
     /**

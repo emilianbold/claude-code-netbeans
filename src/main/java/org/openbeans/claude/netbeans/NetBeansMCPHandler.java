@@ -634,75 +634,26 @@ public class NetBeansMCPHandler {
      */
     private void sendSelectionChangeEvent(JTextComponent textComponent, Node node) {
         try {
-            if (sessions.isEmpty()) {
+            if (sessions.isEmpty() || !(textComponent.getDocument() instanceof StyledDocument)) {
                 return;
             }
-            
-            // Get selection details
-            String selectedText = textComponent.getSelectedText();
-            int selectionStart = textComponent.getSelectionStart();
-            int selectionEnd = textComponent.getSelectionEnd();
-            
-            // Get document and file info
-            Document doc = textComponent.getDocument();
-            DataObject dataObject = node.getLookup().lookup(DataObject.class);
-            
-            if (doc instanceof StyledDocument && dataObject != null) {
-                StyledDocument styledDoc = (StyledDocument) doc;
-                FileObject fileObject = dataObject.getPrimaryFile();
-                
-                if (fileObject != null) {
-                    // Get file path
-                    File file = FileUtil.toFile(fileObject);
-                    if (file == null) {
-                        // Not a local file (e.g. inside a JAR)
-                        return;
-                    }
-                    String absolutePath = file.getAbsolutePath();
-                    String fileUrl = NbUtils.toFileUri(absolutePath);
-                    
-                    // Calculate line and column positions (0-based for protocol)
-                    int startLine = NbDocument.findLineNumber(styledDoc, selectionStart);
-                    int startColumn = NbDocument.findLineColumn(styledDoc, selectionStart);
-                    int endLine = NbDocument.findLineNumber(styledDoc, selectionEnd);
-                    int endColumn = NbDocument.findLineColumn(styledDoc, selectionEnd);
-                    
-                    // Create selection_changed notification
-                    ObjectNode params = responseBuilder.objectNode();
-                    
-                    // Add text (selected text or empty string)
-                    params.put("text", selectedText != null ? selectedText : "");
-                    
-                    // Add file paths
-                    params.put("filePath", absolutePath);
-                    params.put("fileUrl", fileUrl);
-                    
-                    // Add selection object
-                    ObjectNode selection = responseBuilder.objectNode();
-                    
-                    ObjectNode start = responseBuilder.objectNode();
-                    start.put("line", startLine);
-                    start.put("character", startColumn);
-                    selection.set("start", start);
-                    
-                    ObjectNode end = responseBuilder.objectNode();
-                    end.put("line", endLine);
-                    end.put("character", endColumn);
-                    selection.set("end", end);
-                    
-                    // Set isEmpty based on whether there's selected text
-                    selection.put("isEmpty", selectedText == null || selectedText.isEmpty());
-                    
-                    params.set("selection", selection);
-                    
-                    // Create and send the notification
-                    ObjectNode notification = responseBuilder.createNotification("selection_changed", params);
-                    String message = objectMapper.writeValueAsString(notification);
-                    send(message);
-                    
-                    LOGGER.log(Level.FINE, "Sent selection_changed event: {0}", message);
-                }
+            String filePath = NbUtils.filePathOf(node);
+            if (filePath == null) {
+                // Not a local file (e.g. inside a JAR)
+                return;
             }
+
+            // Same shape as the getCurrentSelection tool, minus the success flag
+            NbUtils.SelectionData data = NbUtils.SelectionData.of(
+                    textComponent, (StyledDocument) textComponent.getDocument(), filePath);
+            ObjectNode params = objectMapper.valueToTree(data);
+            params.remove("success");
+
+            ObjectNode notification = responseBuilder.createNotification("selection_changed", params);
+            String message = objectMapper.writeValueAsString(notification);
+            send(message);
+
+            LOGGER.log(Level.FINE, "Sent selection_changed event: {0}", message);
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Error sending selection change event", e);
         }
