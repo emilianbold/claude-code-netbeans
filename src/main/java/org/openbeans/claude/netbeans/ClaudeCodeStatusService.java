@@ -1,5 +1,7 @@
 package org.openbeans.claude.netbeans;
 
+import javax.swing.event.ChangeListener;
+
 /**
  * Service interface for accessing Claude Code integration status.
  * This service is registered in the global lookup to provide status information
@@ -34,4 +36,18 @@ public interface ClaudeCodeStatusService {
      * @return true if lock file is valid, false otherwise
      */
     boolean isLockFileValid();
+
+    /**
+     * Registers a listener notified whenever the status changes (server
+     * started or stopped, lock file created or removed). Listeners may be
+     * called on any thread.
+     *
+     * @param listener the listener
+     */
+    void addChangeListener(ChangeListener listener);
+
+    /**
+     * @param listener a previously added listener
+     */
+    void removeChangeListener(ChangeListener listener);
 }
