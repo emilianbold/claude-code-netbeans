@@ -126,6 +126,6 @@ public final class DiffTabTracker {
         List<Content> contentList = new ArrayList<>();
         contentList.add(new Content("text", "DIFF_REJECTED"));
         contentList.add(new Content("text", tabName));
-        return new OpenDiffResult(contentList);
+        return new OpenDiffResult().withContent(contentList);
     }
 }

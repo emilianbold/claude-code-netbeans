@@ -5,6 +5,7 @@ import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.openbeans.claude.netbeans.tools.params.OpenDiffParams;
+import org.openbeans.claude.netbeans.tools.params.OpenDiffResult;
 import static org.junit.jupiter.api.Assertions.*;
 
 public class OpenDiffTest {
@@ -74,10 +75,11 @@ public class OpenDiffTest {
 
     @Test
     public void runReportsInputErrorsImmediately() throws Exception {
-        String[] status = new String[1];
-        tool().run(params("/etc/passwd", "/etc/passwd", "x", "tab"))
-                .setHandler(r -> status[0] = r.getContent().get(0).getText());
+        OpenDiffResult[] result = new OpenDiffResult[1];
+        tool().run(params("/etc/passwd", "/etc/passwd", "x", "tab")).setHandler(r -> result[0] = r);
 
-        assertTrue(status[0].startsWith("File access denied"), status[0]);
+        String status = result[0].getContent().get(0).getText();
+        assertTrue(status.startsWith("File access denied"), status);
+        assertTrue(result[0].getIsError());
     }
 }

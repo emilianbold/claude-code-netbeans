@@ -26,7 +26,7 @@ public class DiffTabTrackerTest {
     }
 
     private static OpenDiffResult saved() {
-        return new OpenDiffResult(List.of(new Content("text", "FILE_SAVED"), new Content("text", "new")));
+        return new OpenDiffResult().withContent(List.of(new Content("text", "FILE_SAVED"), new Content("text", "new")));
     }
 
     @BeforeEach

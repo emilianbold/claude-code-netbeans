@@ -69,7 +69,7 @@ public class OpenDiff implements Tool<OpenDiffParams, AsyncResponse<OpenDiffResu
     static OpenDiffResult errorResult(String message) {
         List<Content> contentList = new ArrayList<>();
         contentList.add(new Content("text", message));
-        return new OpenDiffResult(contentList);
+        return new OpenDiffResult().withContent(contentList).withIsError(true);
     }
 
     /** Security check, overridable in tests. */
@@ -222,7 +222,7 @@ public class OpenDiff implements Tool<OpenDiffParams, AsyncResponse<OpenDiffResu
             contentList.add(new Content("text", "FILE_SAVED"));
             contentList.add(new Content("text", contents.newText()));
 
-            DiffTabTracker.accept(diffTC, new OpenDiffResult(contentList));
+            DiffTabTracker.accept(diffTC, new OpenDiffResult().withContent(contentList));
             // The diff is settled; further clicks must not send another response.
             approveButton.setEnabled(false);
 

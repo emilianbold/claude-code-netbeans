@@ -26,6 +26,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.WeakHashMap;
 import java.util.List;
@@ -36,7 +37,6 @@ import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import org.netbeans.api.project.ui.OpenProjects;
 import java.io.IOException;
-import org.openbeans.claude.netbeans.tools.AsyncHandler;
 import org.openbeans.claude.netbeans.tools.AsyncResponse;
 import org.openbeans.claude.netbeans.tools.CheckDocumentDirty;
 import org.openbeans.claude.netbeans.tools.CloseAllDiffTabs;
@@ -49,6 +49,7 @@ import org.openbeans.claude.netbeans.tools.GetWorkspaceFolders;
 import org.openbeans.claude.netbeans.tools.OpenDiff;
 import org.openbeans.claude.netbeans.tools.OpenFile;
 import org.openbeans.claude.netbeans.tools.SaveDocument;
+import org.openbeans.claude.netbeans.tools.Tool;
 
 /**
  * Handles Model Context Protocol messages and provides NetBeans IDE capabilities
@@ -56,262 +57,221 @@ import org.openbeans.claude.netbeans.tools.SaveDocument;
  */
 public class NetBeansMCPHandler {
 
-    
     private static final Logger LOGGER = Logger.getLogger(NetBeansMCPHandler.class.getName());
+    private static final String PROTOCOL_VERSION = "2024-11-05";
+
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final MCPResponseBuilder responseBuilder;
-    private Session webSocketSession;
+    private volatile Session webSocketSession;
     
     // Selection tracking
     private final Map<JTextComponent, CaretListener> selectionListeners = new WeakHashMap<>();
     private PropertyChangeListener topComponentListener;
     private PropertyChangeListener diffTabListener;
     private JTextComponent currentTextComponent;
-    
-    private final CheckDocumentDirty checkDocumentDirtyTool;
-    private final CloseAllDiffTabs closeAllDiffTabsTool;
-    private final CloseTab closeTabTool;
-    private final GetCurrentSelection getCurrentSelectionTool;
-    private final GetDiagnostics getDiagnosticsTool;
-    private final GetOpenEditors getOpenEditorsTool;
-    private final GetWorkspaceFolders getWorkspaceFoldersTool;
-    private final OpenDiff openDiffTool;
-    private final OpenFile openFileTool;
-    private final SaveDocument saveDocument;
+
+    /** Tools by MCP name. */
+    private final Map<String, Tool<?, ?>> tools = new LinkedHashMap<>();
 
     public NetBeansMCPHandler() {
-        this.responseBuilder = new MCPResponseBuilder(objectMapper);
-        this.checkDocumentDirtyTool = new CheckDocumentDirty();
-        this.closeAllDiffTabsTool = new CloseAllDiffTabs();
-        this.closeTabTool = new CloseTab();
-        this.getCurrentSelectionTool = new GetCurrentSelection();
-        this.getDiagnosticsTool = new GetDiagnostics();
-        this.getOpenEditorsTool = new GetOpenEditors();
-        this.getWorkspaceFoldersTool = new GetWorkspaceFolders();
-        this.openDiffTool = new OpenDiff();
-        this.openFileTool = new OpenFile();
-        this.saveDocument = new SaveDocument();
+        this(List.of(
+                new OpenFile(),
+                new GetWorkspaceFolders(),
+                new GetOpenEditors(),
+                new GetCurrentSelection(),
+                new CloseTab(),
+                new GetDiagnostics(),
+                new CheckDocumentDirty(),
+                new SaveDocument(),
+                new CloseAllDiffTabs(),
+                new OpenDiff()));
     }
-    
-    /**
-     * Handles incoming MCP messages and routes them to appropriate handlers.
-     * 
-     * @param message the JSON-RPC message
-     * @return response JSON string, or null if no response needed
-     */
-    public String handleMessage(JsonNode message) {
-        try {
-            String method = message.get("method").asText();
-            JsonNode params = message.get("params");
-            Integer id = message.has("id") ? message.get("id").asInt() : null;
-            
-            LOGGER.log(Level.FINE, "Processing MCP method: {0}", method);
-            
-            ObjectNode response = responseBuilder.objectNode();
-            response.put("jsonrpc", "2.0");
-            if (id != null) {
-                response.put("id", id);
-            }
-            
-            switch (method) {
-                case "initialize":
-                    response.set("result", handleInitialize(params));
-                    // Send the response first
-                    String initResponse = objectMapper.writeValueAsString(response);
-                    // Then send notifications/initialized notification
-                    sendInitializedNotification();
-                    return initResponse;
-                    
-                case "tools/list":
-                    response.set("result", handleToolsList());
-                    break;
-                    
-                case "tools/call":
-                    JsonNode toolResult = handleToolsCall(params, id);
-                    if (toolResult == null) {
-                        // Async tool - no immediate response
-                        return null;
-                    }
-                    response.set("result", toolResult);
-                    break;
-                    
-                case "resources/list":
-                    response.set("result", handleResourcesList());
-                    break;
-                    
-                case "resources/read":
-                    response.set("result", handleResourcesRead(params));
-                    break;
-                    
-                case "prompts/list":
-                    response.set("result", handlePromptsList());
-                    break;
-                    
-                default:
-                    LOGGER.log(Level.WARNING, "Unknown MCP method: {0}", method);
-                    return responseBuilder.createErrorResponse(id, -32601, "Method not found", method);
-            }
-            
-            return objectMapper.writeValueAsString(response);
-            
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Error handling MCP message", e);
-            return responseBuilder.createErrorResponse(null, -32603, "Internal error", e.getMessage());
+
+    /** Creates a handler serving the given tools (used by tests). */
+    NetBeansMCPHandler(List<Tool<?, ?>> toolList) {
+        this.responseBuilder = new MCPResponseBuilder(objectMapper);
+        for (Tool<?, ?> tool : toolList) {
+            tools.put(tool.getName(), tool);
+        }
+    }
+
+    /** A JSON-RPC error to be returned to the client. */
+    private static final class ProtocolException extends Exception {
+        final int code;
+
+        ProtocolException(int code, String message) {
+            super(message);
+            this.code = code;
         }
     }
     
     /**
-     * Handles MCP initialize request.
+     * Handles an incoming JSON-RPC message and routes it to the appropriate handler.
+     * Notifications (messages without an id) never get a response.
+     * 
+     * @param message the JSON-RPC message
+     * @return response JSON string, or null if no response must be sent
+     */
+    public String handleMessage(JsonNode message) {
+        JsonNode id = message.get("id");
+        boolean isNotification = id == null;
+        String method = message.path("method").isTextual() ? message.get("method").asText() : null;
+
+        if (method == null) {
+            if (!isNotification && (message.has("result") || message.has("error"))) {
+                // A response to a server-initiated request; we send none, so ignore it.
+                LOGGER.log(Level.FINE, "Ignoring JSON-RPC response with id {0}", id);
+                return null;
+            }
+            return isNotification ? null
+                    : responseBuilder.createErrorResponse(id, MCPResponseBuilder.INVALID_REQUEST, "Invalid Request", "Missing method");
+        }
+
+        if (isNotification) {
+            // e.g. notifications/initialized, notifications/cancelled
+            LOGGER.log(Level.FINE, "Received notification: {0}", method);
+            return null;
+        }
+
+        LOGGER.log(Level.FINE, "Processing MCP method: {0}", method);
+        try {
+            JsonNode params = message.get("params");
+            JsonNode result;
+            switch (method) {
+                case "initialize":
+                    result = handleInitialize(params);
+                    break;
+                case "ping":
+                    result = responseBuilder.objectNode();
+                    break;
+                case "tools/list":
+                    result = handleToolsList();
+                    break;
+                case "tools/call":
+                    result = handleToolsCall(params, id);
+                    if (result == null) {
+                        // Async tool - the response is sent later
+                        return null;
+                    }
+                    break;
+                case "resources/list":
+                    result = handleResourcesList();
+                    break;
+                case "resources/read":
+                    result = handleResourcesRead(params);
+                    break;
+                default:
+                    LOGGER.log(Level.WARNING, "Unknown MCP method: {0}", method);
+                    return responseBuilder.createErrorResponse(id, MCPResponseBuilder.METHOD_NOT_FOUND, "Method not found", method);
+            }
+            return objectMapper.writeValueAsString(responseBuilder.createResponse(id, result));
+
+        } catch (ProtocolException e) {
+            LOGGER.log(Level.WARNING, "Rejected MCP request {0}: {1}", new Object[]{method, e.getMessage()});
+            return responseBuilder.createErrorResponse(id, e.code, e.getMessage(), null);
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Error handling MCP message", e);
+            return responseBuilder.createErrorResponse(id, MCPResponseBuilder.INTERNAL_ERROR, "Internal error", e.getMessage());
+        }
+    }
+    
+    /**
+     * Handles MCP initialize request. Only capabilities that are actually
+     * implemented are advertised.
      */
     private JsonNode handleInitialize(JsonNode params) {
         ObjectNode result = responseBuilder.objectNode();
-        result.put("protocolVersion", "2024-11-05");
+        result.put("protocolVersion", PROTOCOL_VERSION);
         
-        ObjectNode capabilities = responseBuilder.objectNode();
+        ObjectNode capabilities = result.putObject("capabilities");
+        capabilities.putObject("tools");
+        capabilities.putObject("resources");
         
-        ObjectNode toolsCapability = responseBuilder.objectNode();
-        toolsCapability.put("listChanged", true);
-        capabilities.set("tools", toolsCapability);
-        
-        ObjectNode resourcesCapability = responseBuilder.objectNode();
-        resourcesCapability.put("subscribe", true);
-        resourcesCapability.put("listChanged", true);
-        capabilities.set("resources", resourcesCapability);
-        
-        ObjectNode promptsCapability = responseBuilder.objectNode();
-        promptsCapability.put("listChanged", true);
-        capabilities.set("prompts", promptsCapability);
-        
-        result.set("capabilities", capabilities);
-        
-        ObjectNode serverInfo = responseBuilder.objectNode();
+        ObjectNode serverInfo = result.putObject("serverInfo");
         serverInfo.put("name", "netbeans-mcp-server");
         serverInfo.put("version", "1.0.0");
-        result.set("serverInfo", serverInfo);
         
         return result;
-    }
-    
-    /**
-     * Sends the notifications/initialized notification after successful initialization.
-     */
-    private void sendInitializedNotification() {
-        try {
-            if (webSocketSession != null && webSocketSession.isOpen()) {
-                ObjectNode notification = responseBuilder.createNotification(
-                    "notifications/initialized", null
-                );
-                String message = objectMapper.writeValueAsString(notification);
-                webSocketSession.getRemote().sendString(message);
-                LOGGER.log(Level.FINE, "Sent notifications/initialized notification");
-            }
-        } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Failed to send initialized notification", e);
-        }
     }
     
     /**
      * Lists available tools (executable functions).
      */
     private JsonNode handleToolsList() {
-        ArrayNode tools = responseBuilder.arrayNode();
+        ArrayNode toolList = responseBuilder.arrayNode();
         
         // Core Claude Code tools - names/descriptions in code, schemas from JSON
-        tools.add(createToolDefinition("openFile", "Opens a file in the editor", "OpenFileParams"));
-        tools.add(createToolDefinition("getWorkspaceFolders", "Get list of workspace folders (open projects)", "getWorkspaceFolders"));
-        tools.add(createToolDefinition("getOpenEditors", "Get list of currently open editor tabs", "getOpenEditors"));
-        tools.add(createToolDefinition("getCurrentSelection", "Get the current text selection in the active editor", "getCurrentSelection"));
-        tools.add(createToolDefinition("close_tab", "Close an open editor tab", "CloseTabParams"));
-        tools.add(createToolDefinition("getDiagnostics", "Get diagnostic information (errors, warnings) for files", "GetDiagnosticsParams"));
-        tools.add(createToolDefinition("checkDocumentDirty", "Check if a document has unsaved changes", "CheckDocumentDirtyParams"));
-        tools.add(createToolDefinition("saveDocument", "Save a document to disk", "SaveDocumentParams"));
-        tools.add(createToolDefinition("closeAllDiffTabs", "Close all diff viewer tabs", "CloseAllDiffTabsParams"));
-        tools.add(createToolDefinition("openDiff", "Open a git diff for the file", "OpenDiffParams"));
+        toolList.add(createToolDefinition("openFile", "Opens a file in the editor", "OpenFileParams"));
+        toolList.add(createToolDefinition("getWorkspaceFolders", "Get list of workspace folders (open projects)", "getWorkspaceFolders"));
+        toolList.add(createToolDefinition("getOpenEditors", "Get list of currently open editor tabs", "getOpenEditors"));
+        toolList.add(createToolDefinition("getCurrentSelection", "Get the current text selection in the active editor", "getCurrentSelection"));
+        toolList.add(createToolDefinition("close_tab", "Close an open editor tab", "CloseTabParams"));
+        toolList.add(createToolDefinition("getDiagnostics", "Get diagnostic information (errors, warnings) for files", "GetDiagnosticsParams"));
+        toolList.add(createToolDefinition("checkDocumentDirty", "Check if a document has unsaved changes", "CheckDocumentDirtyParams"));
+        toolList.add(createToolDefinition("saveDocument", "Save a document to disk", "SaveDocumentParams"));
+        toolList.add(createToolDefinition("closeAllDiffTabs", "Close all diff viewer tabs", "CloseAllDiffTabsParams"));
+        toolList.add(createToolDefinition("openDiff", "Open a git diff for the file", "OpenDiffParams"));
         
         ObjectNode result = responseBuilder.objectNode();
-        result.set("tools", tools);
+        result.set("tools", toolList);
         return result;
     }
     
     /**
      * Handles tool call requests.
+     *
+     * Unknown tools and unparseable arguments are protocol errors; failures
+     * while running a tool are reported as a result with isError set, so the
+     * model can see and react to them.
+     *
      * @param params Tool call parameters
      * @param requestId Request ID for async response handling
-     * @return JsonNode result for sync tools, null for async tools
+     * @return the CallToolResult for sync tools, null for async tools
      */
-    private JsonNode handleToolsCall(JsonNode params, Integer requestId) {
-        String toolName = params.get("name").asText();
-        JsonNode arguments = params.get("arguments");
-        
-        try {
-            Object result;
-
-            switch (toolName) {
-                // Core Claude Code tools
-                case "openFile":
-                    result = this.openFileTool.run(this.openFileTool.parseArguments(arguments));
-                    break;
-
-                case "getWorkspaceFolders":
-                    result = this.getWorkspaceFoldersTool.run(this.getWorkspaceFoldersTool.parseArguments(arguments));
-                    break;
-
-                case "getOpenEditors":
-                    result = this.getOpenEditorsTool.run(this.getOpenEditorsTool.parseArguments(arguments));
-                    break;
-
-                case "getCurrentSelection":
-                    result = this.getCurrentSelectionTool.run(this.getCurrentSelectionTool.parseArguments(arguments));
-                    break;
-
-                case "close_tab":
-                    result = this.closeTabTool.run(this.closeTabTool.parseArguments(arguments));
-                    break;
-
-                case "getDiagnostics":
-                    result = this.getDiagnosticsTool.run(this.getDiagnosticsTool.parseArguments(arguments));
-                    break;
-
-                case "checkDocumentDirty":
-                    result = this.checkDocumentDirtyTool.run(this.checkDocumentDirtyTool.parseArguments(arguments));
-                    break;
-
-                case "saveDocument":
-                    result = this.saveDocument.run(this.saveDocument.parseArguments(arguments));
-                    break;
-
-                case "closeAllDiffTabs":
-                    result = this.closeAllDiffTabsTool.run(this.closeAllDiffTabsTool.parseArguments(arguments));
-                    break;
-
-                case "openDiff":
-                    result = this.openDiffTool.run(this.openDiffTool.parseArguments(arguments));
-                    break;
-
-                default:
-                    throw new IllegalArgumentException("Unknown tool: " + toolName);
-            }
-
-            // Check if result is async
-            if (result instanceof AsyncResponse) {
-                AsyncResponse asyncResponse = (AsyncResponse) result;
-                asyncResponse.setHandler(new AsyncHandler() {
-                    @Override
-                    public void sendResponse(Object finalResult) {
-                        sendAsyncToolResponse(requestId, finalResult);
-                    }
-                });
-                return null; // No immediate response
-            }
-
-            // Sync response
-            return responseBuilder.createToolResponse(result);
-
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Error executing tool: " + toolName, e);
-            
-            return responseBuilder.createToolResponse("Error: " + e.getMessage());
+    private JsonNode handleToolsCall(JsonNode params, JsonNode requestId) throws ProtocolException {
+        if (params == null || !params.path("name").isTextual()) {
+            throw new ProtocolException(MCPResponseBuilder.INVALID_PARAMS, "Missing tool name");
         }
+        String toolName = params.get("name").asText();
+        Tool<?, ?> tool = tools.get(toolName);
+        if (tool == null) {
+            throw new ProtocolException(MCPResponseBuilder.INVALID_PARAMS, "Unknown tool: " + toolName);
+        }
+
+        Object result;
+        try {
+            result = invoke(tool, params.get("arguments"));
+        } catch (InvalidArgumentsException e) {
+            throw new ProtocolException(MCPResponseBuilder.INVALID_PARAMS,
+                    "Invalid arguments for tool " + toolName + ": " + e.getMessage());
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Error executing tool: " + toolName, e);
+            return responseBuilder.createToolErrorResponse("Error: " + e.getMessage());
+        }
+
+        if (result instanceof AsyncResponse) {
+            @SuppressWarnings("unchecked")
+            AsyncResponse<Object> async = (AsyncResponse<Object>) result;
+            async.setHandler(finalResult -> sendAsyncToolResponse(requestId, finalResult));
+            return null;
+        }
+        return responseBuilder.createToolResponse(result);
+    }
+
+    private static final class InvalidArgumentsException extends Exception {
+        InvalidArgumentsException(Throwable cause) {
+            super(cause.getMessage(), cause);
+        }
+    }
+
+    private static <T, O> Object invoke(Tool<T, O> tool, JsonNode arguments) throws Exception {
+        T parsed;
+        try {
+            parsed = tool.parseArguments(arguments);
+        } catch (IllegalArgumentException e) {
+            throw new InvalidArgumentsException(e);
+        }
+        return tool.run(parsed);
     }
 
     /**
@@ -319,127 +279,88 @@ public class NetBeansMCPHandler {
      * @param requestId The original request ID
      * @param result The tool result to send
      */
-    private void sendAsyncToolResponse(Integer requestId, Object result) {
+    private void sendAsyncToolResponse(JsonNode requestId, Object result) {
         try {
-            if (webSocketSession == null || !webSocketSession.isOpen()) {
-                LOGGER.warning("Cannot send async response - WebSocket not open");
-                return;
-            }
-
-            ObjectNode response = responseBuilder.objectNode();
-            response.put("jsonrpc", "2.0");
-            response.put("id", requestId);
-            response.set("result", responseBuilder.createToolResponse(result));
-
-            String message = objectMapper.writeValueAsString(response);
-            webSocketSession.getRemote().sendString(message);
-
+            String message = objectMapper.writeValueAsString(
+                    responseBuilder.createResponse(requestId, responseBuilder.createToolResponse(result)));
+            send(message);
             LOGGER.log(Level.INFO, "Sent async tool response for request ID: {0}", requestId);
         } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Error sending async tool response", e);
         }
     }
-    
+
     /**
-     * Data class to hold project information.
+     * Sends a message to the connected client, if any.
+     *
+     * @param message serialized JSON-RPC message
      */
-    private static class ProjectData {
-        final String path;
-        final String displayName;
-        
-        ProjectData(String path, String displayName) {
-            this.path = path;
-            this.displayName = displayName;
+    void send(String message) {
+        Session session = webSocketSession;
+        if (session == null || !session.isOpen()) {
+            LOGGER.warning("Cannot send message - WebSocket not open");
+            return;
+        }
+        try {
+            session.getRemote().sendString(message);
+        } catch (IOException e) {
+            LOGGER.log(Level.WARNING, "Failed to send WebSocket message", e);
         }
     }
     
     /**
-     * Retrieves project data from NetBeans Platform.
-     */
-    private List<ProjectData> getOpenProjectsData() {
-        List<ProjectData> projectDataList = new ArrayList<>();
-        Project[] openProjects = OpenProjects.getDefault().getOpenProjects();
-        
-        for (Project project : openProjects) {
-            String path = project.getProjectDirectory().getPath();
-            String displayName = ProjectUtils.getInformation(project).getDisplayName();
-            projectDataList.add(new ProjectData(path, displayName));
-        }
-        
-        return projectDataList;
-    }
-    
-    /**
-     * Lists available resources.
+     * Lists available resources: one per open project.
      */
     private JsonNode handleResourcesList() {
         ArrayNode resources = responseBuilder.arrayNode();
-        
-        // Get project data from NetBeans
-        List<ProjectData> projectDataList = getOpenProjectsData();
-        
-        // Build MCP response from the data
-        for (ProjectData projectData : projectDataList) {
-            ObjectNode resource = responseBuilder.objectNode();
-            resource.put("uri", "project://" + projectData.path);
-            resource.put("name", projectData.displayName);
-            resource.put("description", "NetBeans project: " + projectData.displayName);
+        for (Project project : OpenProjects.getDefault().getOpenProjects()) {
+            String path = project.getProjectDirectory().getPath();
+            String displayName = ProjectUtils.getInformation(project).getDisplayName();
+            ObjectNode resource = resources.addObject();
+            resource.put("uri", "project://" + path);
+            resource.put("name", displayName);
+            resource.put("description", "NetBeans project: " + displayName);
             resource.put("mimeType", "application/json");
-            resources.add(resource);
         }
-        
         ObjectNode result = responseBuilder.objectNode();
         result.set("resources", resources);
         return result;
     }
     
     /**
-     * Reads a resource.
+     * Reads a resource. Returns { contents: [ { uri, mimeType, text } ] }.
      */
-    private JsonNode handleResourcesRead(JsonNode params) {
+    private JsonNode handleResourcesRead(JsonNode params) throws Exception {
+        if (params == null || !params.path("uri").isTextual()) {
+            throw new ProtocolException(MCPResponseBuilder.INVALID_PARAMS, "Missing resource uri");
+        }
         String uri = params.get("uri").asText();
-        
-        if (uri.startsWith("project://")) {
-            String projectPath = uri.substring("project://".length());
-            //XXX: This is probably doing the wrong thing
-            return getProjectInfo(projectPath);
+        if (!uri.startsWith("project://")) {
+            throw new ProtocolException(MCPResponseBuilder.INVALID_PARAMS, "Unknown resource URI: " + uri);
         }
-        
-        throw new IllegalArgumentException("Unknown resource URI: " + uri);
-    }
-    
-    /**
-     * Lists available prompts.
-     */
-    private JsonNode handlePromptsList() {
-        ArrayNode prompts = responseBuilder.arrayNode();
-        
-        ObjectNode codeReviewPrompt = responseBuilder.objectNode();
-        codeReviewPrompt.put("name", "code_review");
-        codeReviewPrompt.put("description", "Review code in NetBeans project");
-        prompts.add(codeReviewPrompt);
-        
-        ObjectNode result = responseBuilder.objectNode();
-        result.set("prompts", prompts);
-        return result;
-    }
-    
-    // Helper methods
-    
-    private JsonNode getProjectInfo(String projectPath) {
-        FileObject projectDir = FileUtil.toFileObject(new File(projectPath));
-        if (projectDir == null) {
-            throw new IllegalArgumentException("Project not found: " + projectPath);
+        String projectPath = uri.substring("project://".length());
+        // Only expose projects that are actually open
+        Project project = null;
+        for (Project p : OpenProjects.getDefault().getOpenProjects()) {
+            if (p.getProjectDirectory().getPath().equals(projectPath)) {
+                project = p;
+                break;
+            }
         }
-        
+        if (project == null) {
+            throw new ProtocolException(MCPResponseBuilder.INVALID_PARAMS, "Project not open: " + projectPath);
+        }
+
         ObjectNode projectInfo = responseBuilder.objectNode();
         projectInfo.put("path", projectPath);
-        projectInfo.put("name", projectDir.getName());
-        
-        ArrayNode files = responseBuilder.arrayNode();
-        // projectInfo.set("files", files);
-        
-        return projectInfo;
+        projectInfo.put("name", ProjectUtils.getInformation(project).getDisplayName());
+
+        ObjectNode result = responseBuilder.objectNode();
+        ObjectNode item = result.putArray("contents").addObject();
+        item.put("uri", uri);
+        item.put("mimeType", "application/json");
+        item.put("text", objectMapper.writeValueAsString(projectInfo));
+        return result;
     }
     
     private ObjectNode createToolDefinition(String toolName, String description, String schemaFileName) {
@@ -687,7 +608,7 @@ public class NetBeansMCPHandler {
                     // Create and send the notification
                     ObjectNode notification = responseBuilder.createNotification("selection_changed", params);
                     String message = objectMapper.writeValueAsString(notification);
-                    webSocketSession.getRemote().sendString(message);
+                    send(message);
                     
                     LOGGER.log(Level.FINE, "Sent selection_changed event: {0}", message);
                 }
