@@ -328,6 +328,31 @@
     </build>
 
     <profiles>
+        <!--
+          Since JDK 23, javac no longer runs annotation processors found on the
+          class path unless asked to. Without them the module jar lacks its
+          generated layer.xml and META-INF/services, so the status bar label,
+          the Tools menu action and the status service are not registered.
+        -->
+        <profile>
+            <id>annotation-processing-jdk23</id>
+            <activation>
+                <jdk>[23,)</jdk>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-compiler-plugin</artifactId>
+                        <configuration>
+                            <compilerArgs>
+                                <arg>-proc:full</arg>
+                            </compilerArgs>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
         <profile>
             <id>release</id>
             <build>
