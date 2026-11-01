@@ -50,6 +50,9 @@ public class LockFileManager {
         try {
             // Set the lock file path based on the port
             this.lockFilePath = getLockFilePath(port);
+
+            // Remove lock files left behind by NetBeans instances that crashed
+            cleanStaleLockFiles(lockFilePath.getParent());
             
             writeLockFile(lockFilePath, pid, authToken, getWorkspaceFolders());
             lockFileCreated = true;
@@ -89,6 +92,42 @@ public class LockFileManager {
         }
     }
     
+    /**
+     * Deletes NetBeans lock files whose process is no longer running, so
+     * Claude Code does not offer connections to dead IDE instances. Lock
+     * files of other IDEs and unreadable files are left alone.
+     *
+     * @param ideDir the directory containing the lock files
+     */
+    static void cleanStaleLockFiles(Path ideDir) {
+        if (!Files.isDirectory(ideDir)) {
+            return;
+        }
+        ObjectMapper mapper = new ObjectMapper();
+        try (java.nio.file.DirectoryStream<Path> files = Files.newDirectoryStream(ideDir, "*.lock")) {
+            for (Path file : files) {
+                try {
+                    com.fasterxml.jackson.databind.JsonNode data = mapper.readTree(file.toFile());
+                    if (data == null || !"NetBeans".equals(data.path("ideName").asText())
+                            || !data.path("pid").canConvertToLong()) {
+                        continue;
+                    }
+                    long pid = data.get("pid").asLong();
+                    boolean alive = ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false);
+                    if (!alive) {
+                        Files.deleteIfExists(file);
+                        LOGGER.log(Level.INFO, "Removed stale lock file {0} (process {1} is gone)",
+                                new Object[]{file, pid});
+                    }
+                } catch (IOException e) {
+                    LOGGER.log(Level.FINE, "Skipping unreadable lock file " + file, e);
+                }
+            }
+        } catch (IOException e) {
+            LOGGER.log(Level.WARNING, "Failed to scan for stale lock files", e);
+        }
+    }
+
     /**
      * Writes a lock file containing the given data.
      *
@@ -197,13 +236,7 @@ public class LockFileManager {
      * @return Process ID
      */
     public static long getCurrentProcessId() {
-        try {
-            String processName = java.lang.management.ManagementFactory.getRuntimeMXBean().getName();
-            return Long.parseLong(processName.split("@")[0]);
-        } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Could not determine process ID", e);
-            return -1;
-        }
+        return ProcessHandle.current().pid();
     }
     
     /**

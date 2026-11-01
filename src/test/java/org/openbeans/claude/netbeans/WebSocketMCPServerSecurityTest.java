@@ -94,4 +94,18 @@ public class WebSocketMCPServerSecurityTest {
                 || "127.0.0.1".equals(server.getHost()),
                 "server must bind to loopback, was: " + server.getHost());
     }
+
+    @Test
+    public void skipsPortsThatAreInUse() throws Exception {
+        int taken = server.getPort();
+        // The running server occupies its port; a second server must pick another one
+        WebSocketMCPServer second = new WebSocketMCPServer(new NoUiHandler());
+        try {
+            assertTrue(second.start());
+            assertNotEquals(taken, second.getPort());
+            assertTrue(second.isRunning());
+        } finally {
+            second.stop();
+        }
+    }
 }

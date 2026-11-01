@@ -44,4 +44,32 @@ public class LockFileManagerTest {
 
         assertEquals("new", new ObjectMapper().readTree(lockFile.toFile()).get("authToken").asText());
     }
+
+    @Test
+    public void removesOnlyStaleNetBeansLockFiles() throws Exception {
+        long deadPid = deadPid();
+        Path alive = tempDir.resolve("1.lock");
+        Path stale = tempDir.resolve("2.lock");
+        Path otherIde = tempDir.resolve("3.lock");
+        Path garbage = tempDir.resolve("4.lock");
+        LockFileManager.writeLockFile(alive, ProcessHandle.current().pid(), "t", List.of());
+        LockFileManager.writeLockFile(stale, deadPid, "t", List.of());
+        Files.writeString(otherIde, "{\"pid\":" + deadPid + ",\"ideName\":\"Visual Studio Code\"}");
+        Files.writeString(garbage, "not json");
+
+        LockFileManager.cleanStaleLockFiles(tempDir);
+
+        assertTrue(Files.exists(alive));
+        assertFalse(Files.exists(stale));
+        assertTrue(Files.exists(otherIde), "other IDEs' lock files must not be touched");
+        assertTrue(Files.exists(garbage));
+    }
+
+    /** A pid that belongs to no running process. */
+    private static long deadPid() throws Exception {
+        Process p = new ProcessBuilder("java", "-version").redirectErrorStream(true).start();
+        p.getInputStream().readAllBytes();
+        p.waitFor();
+        return p.pid();
+    }
 }

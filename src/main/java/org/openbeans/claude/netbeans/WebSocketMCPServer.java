@@ -5,8 +5,7 @@ import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.websocket.server.config.JettyWebSocketServletContainerInitializer;
 
-import java.net.InetAddress;
-import java.net.ServerSocket;
+import java.net.BindException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.UUID;
@@ -44,76 +43,99 @@ public class WebSocketMCPServer {
      * @return true if server started successfully
      */
     public boolean start() {
-        try {
-            // Find an available port
-            port = findAvailablePort();
-            if (port == -1) {
-                LOGGER.severe("No available ports found in range " + PORT_RANGE_START + "-" + PORT_RANGE_END);
-                return false;
+        // Bind directly instead of probing first: a probed port could be taken
+        // by another process before Jetty binds it.
+        for (int candidate = PORT_RANGE_START; candidate <= PORT_RANGE_END; candidate++) {
+            Server candidateServer = createServer(candidate);
+            try {
+                candidateServer.start();
+                server = candidateServer;
+                port = candidate;
+                LOGGER.log(Level.INFO, "WebSocket MCP server started on port {0}", port);
+                return true;
+            } catch (Exception e) {
+                stopQuietly(candidateServer);
+                if (!isBindFailure(e)) {
+                    LOGGER.log(Level.SEVERE, "Failed to start WebSocket server", e);
+                    return false;
+                }
+                LOGGER.log(Level.FINE, "Port {0} is in use, trying next", candidate);
             }
-            
-            // Create Jetty server
-            server = new Server();
-            ServerConnector connector = new ServerConnector(server);
-            connector.setHost(BIND_HOST);
-            connector.setPort(port);
-            server.addConnector(connector);
-            
-            // Setup WebSocket context
-            ServletContextHandler context = new ServletContextHandler(ServletContextHandler.SESSIONS);
-            context.setContextPath("/");
-            server.setHandler(context);
-            
-            // Configure WebSocket
-            JettyWebSocketServletContainerInitializer.configure(context, (servletContext, wsContainer) -> {
-                // Configure WebSocket container
-                wsContainer.setMaxTextMessageSize(1024 * 1024); // 1MB
-                wsContainer.setMaxBinaryMessageSize(1024 * 1024); // 1MB
-                wsContainer.setIdleTimeout(java.time.Duration.ZERO); // No timeout
-                
-                // Add WebSocket endpoint with subprotocol negotiation
-                wsContainer.addMapping("/", (upgradeRequest, upgradeResponse) -> {
-                    // Reject browsers: any web page can open a WebSocket to localhost,
-                    // but browsers always send an Origin header and the CLI does not.
-                    String origin = upgradeRequest.getHeader("Origin");
-                    if (origin != null) {
-                        LOGGER.log(Level.WARNING, "Rejected WebSocket connection with Origin: {0}", origin);
-                        reject(upgradeResponse, "Browser connections are not allowed");
-                        return null;
-                    }
+        }
+        LOGGER.severe("No available ports found in range " + PORT_RANGE_START + "-" + PORT_RANGE_END);
+        return false;
+    }
 
-                    // Require the auth token published in the lock file
-                    if (!isValidToken(upgradeRequest.getHeader(AUTH_HEADER))) {
-                        LOGGER.warning("Rejected WebSocket connection with missing or invalid auth token");
-                        reject(upgradeResponse, "Invalid or missing authentication token");
-                        return null;
-                    }
+    private static boolean isBindFailure(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof BindException) {
+                return true;
+            }
+        }
+        return false;
+    }
 
-                    // Handle MCP subprotocol negotiation
-                    java.util.List<String> subprotocols = upgradeRequest.getSubProtocols();
-                    if (subprotocols != null) {
-                        // Accept common MCP subprotocols
-                        for (String subprotocol : subprotocols) {
-                            if ("mcp".equals(subprotocol) || "mcp-v1".equals(subprotocol)) {
-                                upgradeResponse.setAcceptedSubProtocol(subprotocol);
-                                break;
-                            }
+    private static void stopQuietly(Server s) {
+        try {
+            s.stop();
+        } catch (Exception e) {
+            LOGGER.log(Level.FINE, "Error stopping server after failed start", e);
+        }
+    }
+
+    private Server createServer(int serverPort) {
+        Server jetty = new Server();
+        ServerConnector connector = new ServerConnector(jetty);
+        connector.setHost(BIND_HOST);
+        connector.setPort(serverPort);
+        jetty.addConnector(connector);
+            
+        // Setup WebSocket context
+        ServletContextHandler context = new ServletContextHandler(ServletContextHandler.SESSIONS);
+        context.setContextPath("/");
+        jetty.setHandler(context);
+        
+        // Configure WebSocket
+        JettyWebSocketServletContainerInitializer.configure(context, (servletContext, wsContainer) -> {
+            // Configure WebSocket container
+            wsContainer.setMaxTextMessageSize(1024 * 1024); // 1MB
+            wsContainer.setMaxBinaryMessageSize(1024 * 1024); // 1MB
+            wsContainer.setIdleTimeout(java.time.Duration.ZERO); // No timeout
+            
+            // Add WebSocket endpoint with subprotocol negotiation
+            wsContainer.addMapping("/", (upgradeRequest, upgradeResponse) -> {
+                // Reject browsers: any web page can open a WebSocket to localhost,
+                // but browsers always send an Origin header and the CLI does not.
+                String origin = upgradeRequest.getHeader("Origin");
+                if (origin != null) {
+                    LOGGER.log(Level.WARNING, "Rejected WebSocket connection with Origin: {0}", origin);
+                    reject(upgradeResponse, "Browser connections are not allowed");
+                    return null;
+                }
+
+                // Require the auth token published in the lock file
+                if (!isValidToken(upgradeRequest.getHeader(AUTH_HEADER))) {
+                    LOGGER.warning("Rejected WebSocket connection with missing or invalid auth token");
+                    reject(upgradeResponse, "Invalid or missing authentication token");
+                    return null;
+                }
+
+                // Handle MCP subprotocol negotiation
+                java.util.List<String> subprotocols = upgradeRequest.getSubProtocols();
+                if (subprotocols != null) {
+                    // Accept common MCP subprotocols
+                    for (String subprotocol : subprotocols) {
+                        if ("mcp".equals(subprotocol) || "mcp-v1".equals(subprotocol)) {
+                            upgradeResponse.setAcceptedSubProtocol(subprotocol);
+                            break;
                         }
                     }
-                    return new MCPWebSocketHandler(mcpHandler);
-                });
+                }
+                return new MCPWebSocketHandler(mcpHandler);
             });
-            
-            // Start the server
-            server.start();
-            
-            LOGGER.log(Level.INFO, "WebSocket MCP server started on port {0}", port);
-            return true;
-            
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Failed to start WebSocket server", e);
-            return false;
-        }
+        });
+        
+        return jetty;
     }
     
     /**
@@ -184,19 +206,4 @@ public class WebSocketMCPServer {
         return server != null && server.isStarted();
     }
     
-    /**
-     * Finds an available port in the specified range.
-     * 
-     * @return available port number, or -1 if none found
-     */
-    private int findAvailablePort() {
-        for (int port = PORT_RANGE_START; port <= PORT_RANGE_END; port++) {
-            try (ServerSocket socket = new ServerSocket(port, 1, InetAddress.getByName(BIND_HOST))) {
-                return port;
-            } catch (Exception e) {
-                // Port is in use, try next one
-            }
-        }
-        return -1;
-    }
 }
