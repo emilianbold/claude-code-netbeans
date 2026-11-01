@@ -1,8 +1,6 @@
 package org.openbeans.claude.netbeans.tools;
 
 import java.io.File;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 import org.openbeans.claude.netbeans.NbUtils;
 import org.openbeans.claude.netbeans.tools.params.OpenFileParams;
 import org.openide.cookies.EditorCookie;
@@ -15,7 +13,6 @@ import org.openide.loaders.DataObject;
  */
 public class OpenFile implements Tool<OpenFileParams, String> {
     
-    private static final Logger LOGGER = Logger.getLogger(OpenFile.class.getName());
     
     @Override
     public String getName() {
@@ -35,7 +32,6 @@ public class OpenFile implements Tool<OpenFileParams, String> {
     @Override
     public String run(OpenFileParams params) throws Exception {
         String filePath = params.getFilePath();
-        boolean preview = params.getPreview() != null ? params.getPreview() : false;
         
         try {
             // Security check: Only allow opening files within open project directories

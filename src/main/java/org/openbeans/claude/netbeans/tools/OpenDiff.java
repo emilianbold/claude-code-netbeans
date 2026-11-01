@@ -1,5 +1,6 @@
 package org.openbeans.claude.netbeans.tools;
 
+import java.awt.BorderLayout;
 import java.io.File;
 import java.io.IOException;
 import java.io.Reader;
@@ -7,25 +8,31 @@ import java.io.StringReader;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import javax.swing.JButton;
+import javax.swing.JToolBar;
+import javax.swing.SwingUtilities;
 import org.netbeans.api.diff.Diff;
 import org.netbeans.api.diff.DiffView;
 import org.netbeans.api.diff.Difference;
 import org.netbeans.api.diff.StreamSource;
 import org.openbeans.claude.netbeans.EditorUtils;
 import org.openbeans.claude.netbeans.NbUtils;
-import java.util.ArrayList;
-import java.util.List;
+import org.openbeans.claude.netbeans.tools.params.Content;
 import org.openbeans.claude.netbeans.tools.params.OpenDiffParams;
 import org.openbeans.claude.netbeans.tools.params.OpenDiffResult;
-import org.openbeans.claude.netbeans.tools.params.Content;
+import org.openide.filesystems.FileObject;
+import org.openide.filesystems.FileUtil;
 import org.openide.util.Lookup;
 import org.openide.windows.TopComponent;
-import javax.swing.SwingUtilities;
 
 /**
- * Tool to open a git diff for the file.
+ * Tool to show a diff of a proposed change and let the user approve or reject it.
+ * The response is sent asynchronously once the user approves (FILE_SAVED) or
+ * closes the tab (DIFF_REJECTED).
  */
 public class OpenDiff implements Tool<OpenDiffParams, AsyncResponse<OpenDiffResult>> {
 
@@ -46,249 +53,249 @@ public class OpenDiff implements Tool<OpenDiffParams, AsyncResponse<OpenDiffResu
         return OpenDiffParams.class;
     }
 
-    private AsyncResponse<OpenDiffResult> createAsyncResponse(OpenDiffResult o) {
-        return new AsyncResponse<OpenDiffResult>() {
-            @Override
-            public void setHandler(AsyncHandler<OpenDiffResult> handler) {
-                handler.sendResponse(o);
-            }
-        };
+    /** Resolved inputs for a diff. */
+    record DiffContents(String oldPath, String newPath, String oldText, String newText, String tabName) {
     }
 
-    private OpenDiffResult createErrorResult(String message) {
+    /** Signals a problem that should be reported to Claude as the tool result. */
+    static final class DiffInputException extends Exception {
+        DiffInputException(String message) {
+            super(message);
+        }
+    }
+
+    private static AsyncResponse<OpenDiffResult> immediate(OpenDiffResult result) {
+        return handler -> handler.sendResponse(result);
+    }
+
+    static OpenDiffResult errorResult(String message) {
         List<Content> contentList = new ArrayList<>();
-        Content content = new Content("text", message);
-        contentList.add(content);
-        return new OpenDiffResult(contentList);
+        contentList.add(new Content("text", message));
+        return new OpenDiffResult().withContent(contentList).withIsError(true);
+    }
+
+    /** Security check, overridable in tests. */
+    boolean isPathAllowed(String path) {
+        return NbUtils.isPathWithinOpenProjects(path);
+    }
+
+    /** Path of the active editor, overridable in tests. */
+    String currentEditorPath() {
+        return EditorUtils.getCurrentEditorFilePath();
+    }
+
+    /** Buffer content (with unsaved changes) of the active editor, overridable in tests. */
+    String currentEditorContent() {
+        return EditorUtils.getCurrentEditorContent();
+    }
+
+    /**
+     * Works out the paths and texts to compare. A missing old file is treated
+     * as empty, so diffs for newly created files work.
+     */
+    DiffContents resolveContents(OpenDiffParams params) throws DiffInputException {
+        String oldFilePath = params.getOldFilePath();
+        String newFilePath = params.getNewFilePath();
+
+        String editorPath = null;
+        String editorContent = null;
+        if (oldFilePath == null || newFilePath == null) {
+            editorPath = currentEditorPath();
+            if (editorPath == null) {
+                throw new DiffInputException("No active editor found. Please specify file paths or open a file in the editor.");
+            }
+            editorContent = currentEditorContent();
+        }
+        String oldPath = oldFilePath != null ? oldFilePath : editorPath;
+        String newPath = newFilePath != null ? newFilePath : editorPath;
+
+        // Security check: Only allow diffing files within open project directories
+        if (!isPathAllowed(oldPath)) {
+            throw new SecurityException("File access denied: old_file_path is not within any open project directory: " + oldPath);
+        }
+        if (!isPathAllowed(newPath)) {
+            throw new SecurityException("File access denied: new_file_path is not within any open project directory: " + newPath);
+        }
+
+        String oldText;
+        if (oldFilePath == null && editorContent != null) {
+            oldText = editorContent;
+        } else if (!new File(oldPath).exists()) {
+            // New file: compare against empty content
+            oldText = "";
+        } else {
+            oldText = read(oldPath, "old");
+        }
+
+        String newText;
+        if (params.getNewFileContents() != null) {
+            newText = params.getNewFileContents();
+        } else if (newFilePath == null && editorContent != null) {
+            newText = editorContent;
+        } else if (!new File(newPath).exists()) {
+            throw new DiffInputException("New file does not exist: " + newPath);
+        } else {
+            newText = read(newPath, "new");
+        }
+
+        String tabName = params.getTabName() != null ? params.getTabName()
+                : "Diff: " + new File(oldPath).getName() + " vs " + new File(newPath).getName();
+
+        return new DiffContents(oldPath, newPath, oldText, newText, tabName);
+    }
+
+    private static String read(String path, String which) throws DiffInputException {
+        try {
+            return Files.readString(new File(path).toPath(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            LOGGER.log(Level.WARNING, "Failed to read " + which + " file for diff: " + path, e);
+            throw new DiffInputException("Failed to read " + which + " file: " + e.getMessage());
+        }
     }
 
     @Override
     public AsyncResponse<OpenDiffResult> run(OpenDiffParams params) throws Exception {
-        String oldFilePath = params.getOldFilePath();
-        String newFilePath = params.getNewFilePath();
-        String newFileContents = params.getNewFileContents();
-        String tabName = params.getTabName();
-
+        final DiffContents contents;
         try {
-            // Track if we're using the current editor for defaults
-            boolean usingCurrentEditor = false;
-            String currentEditorPath = null;
-            String currentEditorContent = null;
-
-            // If paths are not provided, use current active editor
-            String finalOldFilePath;
-            String finalNewFilePath;
-            if (oldFilePath == null || newFilePath == null) {
-                currentEditorPath = EditorUtils.getCurrentEditorFilePath();
-                if (currentEditorPath == null) {
-                    return createAsyncResponse(createErrorResult("No active editor found. Please specify file paths or open a file in the editor."));
-                }
-                usingCurrentEditor = true;
-                currentEditorContent = EditorUtils.getCurrentEditorContent(); // Get the buffer content with unsaved changes
-                finalOldFilePath = (oldFilePath == null) ? currentEditorPath : oldFilePath;
-                finalNewFilePath = (newFilePath == null) ? currentEditorPath : newFilePath;
-            } else {
-                finalOldFilePath = oldFilePath;
-                finalNewFilePath = newFilePath;
-            }
-
-            // Security check: Only allow diffing files within open project directories
-            if (!NbUtils.isPathWithinOpenProjects(finalOldFilePath)) {
-                throw new SecurityException("File access denied: old_file_path is not within any open project directory: " + finalOldFilePath);
-            }
-            if (!NbUtils.isPathWithinOpenProjects(finalNewFilePath)) {
-                throw new SecurityException("File access denied: new_file_path is not within any open project directory: " + finalNewFilePath);
-            }
-
-            // Read the old file content
-            final File oldFile = new File(finalOldFilePath);
-            final String oldFileContents;
-
-            // If old file is the current editor and we're using it as default, use the editor buffer content
-            if (usingCurrentEditor && oldFilePath == null && finalOldFilePath.equals(currentEditorPath) && currentEditorContent != null) {
-                oldFileContents = currentEditorContent;
-            } else {
-                // Otherwise read from disk
-                if (!oldFile.exists()) {
-                    LOGGER.warning("Old file does not exist for diff: " + finalOldFilePath);
-                    return createAsyncResponse(createErrorResult("Old file does not exist: " + finalOldFilePath));
-                }
-                try {
-                    oldFileContents = Files.readString(oldFile.toPath(), StandardCharsets.UTF_8);
-                } catch (IOException e) {
-                    LOGGER.log(Level.WARNING, "Failed to read old file for diff: " + finalOldFilePath, e);
-                    return createAsyncResponse(createErrorResult("Failed to read old file: " + e.getMessage()));
-                }
-            }
-
-            // If new file contents not provided, determine how to get them
-            final String finalNewFileContents;
-            if (newFileContents == null) {
-                // If new file is the current editor and we're using it as default, use the editor buffer content
-                if (usingCurrentEditor && newFilePath == null && finalNewFilePath.equals(currentEditorPath) && currentEditorContent != null) {
-                    finalNewFileContents = currentEditorContent;
-                } else {
-                    // Otherwise read from disk
-                    File newFile = new File(finalNewFilePath);
-                    if (!newFile.exists()) {
-                        LOGGER.warning("New file does not exist for diff: " + finalNewFilePath);
-                        return createAsyncResponse(createErrorResult("New file does not exist: " + finalNewFilePath));
-                    }
-                    try {
-                        finalNewFileContents = Files.readString(newFile.toPath(), StandardCharsets.UTF_8);
-                    } catch (IOException e) {
-                        LOGGER.log(Level.WARNING, "Failed to read new file for diff: " + finalNewFilePath, e);
-                        return createAsyncResponse(createErrorResult("Failed to read new file: " + e.getMessage()));
-                    }
-                }
-            } else {
-                finalNewFileContents = newFileContents;
-            }
-
-            // Create stream sources for diff
-            StreamSource oldSource = new StreamSource() {
-                @Override
-                public String getName() {
-                    return oldFile.getName() + " (original)";
-                }
-
-                @Override
-                public String getTitle() {
-                    return finalOldFilePath;
-                }
-
-                @Override
-                public String getMIMEType() {
-                    return "text/plain";
-                }
-
-                @Override
-                public Reader createReader() throws IOException {
-                    return new StringReader(oldFileContents);
-                }
-
-                @Override
-                public Writer createWriter(Difference[] conflicts) throws IOException {
-                    throw new IOException("Writing not supported for original file");
-                }
-            };
-
-            StreamSource newSource = new StreamSource() {
-                @Override
-                public String getName() {
-                    return new File(finalNewFilePath).getName() + " (modified)";
-                }
-
-                @Override
-                public String getTitle() {
-                    return finalNewFilePath;
-                }
-
-                @Override
-                public String getMIMEType() {
-                    return "text/plain";
-                }
-
-                @Override
-                public Reader createReader() throws IOException {
-                    return new StringReader(finalNewFileContents);
-                }
-
-                @Override
-                public Writer createWriter(Difference[] conflicts) throws IOException {
-                    throw new IOException("Writing not supported for modified content");
-                }
-            };
-
-            // Get Diff service and create diff view
-            Diff diffService = Lookup.getDefault().lookup(Diff.class);
-            if (diffService != null) {
-                try {
-                    String diffTabName = tabName != null ? tabName
-                            : "Diff: " + oldFile.getName() + " vs " + new File(finalNewFilePath).getName();
-
-                    DiffView diffView = diffService.createDiff(oldSource, newSource);
-                    if (diffView != null) {
-                        // Wrap the diff view in a TopComponent (recommended pattern)
-                        final String finalDiffTabName = diffTabName;
-                        TopComponent diffTC = new TopComponent();
-                        diffTC.setDisplayName(diffTabName);
-                        diffTC.setLayout(new java.awt.BorderLayout());
-
-                        // Add toolbar with approve button
-                        javax.swing.JToolBar toolbar = diffView.getToolBar();
-                        if (toolbar == null) {
-                            toolbar = new javax.swing.JToolBar();
-                        }
-
-                        // Create approve button
-                        javax.swing.JButton approveButton = new javax.swing.JButton("✓ Approve");
-                        approveButton.setToolTipText("Approve and apply this diff");
-                        approveButton.addActionListener(e -> {
-                            // Get the handler from DiffTabTracker
-                            LOGGER.info("Diff approved: " + finalDiffTabName);
-
-                            //NOTE: While the message says FILE_SAVED, the IDE does not need to save it. Claude will want to write to it.
-                            // If needed, we could also do it via
-                            //
-                            //    FileObject fo = FileUtil.toFileObject(file);
-                            //    DataObject dao = DataObject.find(fo);
-                            //    EditorCookie ec = dao.getLookup().lookup(EditorCookie.class);
-                            //    StyledDocument doc = ec.openDocument();
-                            //    doc.remove(0, doc.getLength());
-                            //    doc.insertString(0, content, null);
-                            //    SaveCookie save = dao.getLookup().lookup(SaveCookie.class);
-                            //    save.save();
-                            // but then Claude actually gets confused:
-                            //    > Error: File has been unexpectedly modified. Read it again before attempting to write it.
-
-                            // Create response with DIFF_ACCEPTED status
-                            List<Content> contentList = new ArrayList<>();
-                            contentList.add(new Content("text", "FILE_SAVED"));
-                            contentList.add(new Content("text", finalNewFileContents));
-                            OpenDiffResult result = new OpenDiffResult(contentList);
-
-                            DiffTabTracker.setResponse(finalDiffTabName, result);
-
-                            // Note: We do not close the diff tab here. Claude Code will close the tab via command.
-                        });
-
-                        // Add approve button as first button in toolbar
-                        toolbar.add(approveButton, 0);
-                        diffTC.add(toolbar, java.awt.BorderLayout.NORTH);
-
-                        diffTC.add(diffView.getComponent(), java.awt.BorderLayout.CENTER);
-
-                        // Open the TopComponent on the EDT (Event Dispatch Thread)
-                        SwingUtilities.invokeLater(() -> {
-                            diffTC.open();
-                            diffTC.requestActive();
-                        });
-
-                        // Return async response - will be resolved when user accepts/rejects diff
-                        return new AsyncResponse<OpenDiffResult>() {
-                            @Override
-                            public void setHandler(AsyncHandler<OpenDiffResult> handler) {
-                                LOGGER.info("Registering async handler for diff tab: " + finalDiffTabName);
-                                DiffTabTracker.register(finalDiffTabName, handler);
-                            }
-                        };
-                    } else {
-                        LOGGER.warning("Failed to create diff view - diffView is null");
-                        return createAsyncResponse(createErrorResult("Failed to create diff view"));
-                    }
-                } catch (IOException e) {
-                    LOGGER.log(Level.WARNING, "Error creating diff view", e);
-                    return createAsyncResponse(createErrorResult("Error creating diff: " + e.getMessage()));
-                }
-            } else {
-                LOGGER.warning("Diff service not available - no Diff implementation found in Lookup");
-                return createAsyncResponse(createErrorResult("Diff service not available"));
-            }
-
-        } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Error opening diff", e);
-            return createAsyncResponse(createErrorResult("Error opening diff: " + e.getMessage()));
+            contents = resolveContents(params);
+        } catch (DiffInputException | SecurityException e) {
+            LOGGER.log(Level.WARNING, "Cannot open diff: {0}", e.getMessage());
+            return immediate(errorResult(e.getMessage()));
         }
+
+        // The UI is built on the EDT once the handler is known, so the tab is
+        // registered before the user can interact with or close it.
+        return handler -> SwingUtilities.invokeLater(() -> {
+            try {
+                showDiff(contents, handler);
+            } catch (Exception e) {
+                LOGGER.log(Level.WARNING, "Error opening diff", e);
+                handler.sendResponse(errorResult("Error opening diff: " + e.getMessage()));
+            }
+        });
+    }
+
+    /** Must be called on the EDT. */
+    private void showDiff(DiffContents contents, AsyncHandler<OpenDiffResult> handler) throws IOException {
+        Diff diffService = Lookup.getDefault().lookup(Diff.class);
+        if (diffService == null) {
+            LOGGER.warning("Diff service not available - no Diff implementation found in Lookup");
+            handler.sendResponse(errorResult("Diff service not available"));
+            return;
+        }
+
+        DiffView diffView = diffService.createDiff(
+                source(new File(contents.oldPath()).getName() + " (original)", contents.oldPath(),
+                        mimeTypeFor(contents.oldPath()), contents.oldText()),
+                source(new File(contents.newPath()).getName() + " (modified)", contents.newPath(),
+                        mimeTypeFor(contents.newPath()), contents.newText()));
+        if (diffView == null) {
+            LOGGER.warning("Failed to create diff view - diffView is null");
+            handler.sendResponse(errorResult("Failed to create diff view"));
+            return;
+        }
+
+        ClaudeDiffTopComponent diffTC = new ClaudeDiffTopComponent();
+        diffTC.setDisplayName(contents.tabName());
+        diffTC.setLayout(new BorderLayout());
+
+        JToolBar toolbar = diffView.getToolBar();
+        if (toolbar == null) {
+            toolbar = new JToolBar();
+        }
+
+        JButton approveButton = new JButton("✓ Approve");
+        approveButton.setToolTipText("Approve and apply this diff");
+        approveButton.addActionListener(e -> {
+            LOGGER.info("Diff approved: " + contents.tabName());
+
+            //NOTE: While the message says FILE_SAVED, the IDE does not need to save it. Claude will want to write to it.
+            // If needed, we could also do it via
+            //
+            //    FileObject fo = FileUtil.toFileObject(file);
+            //    DataObject dao = DataObject.find(fo);
+            //    EditorCookie ec = dao.getLookup().lookup(EditorCookie.class);
+            //    StyledDocument doc = ec.openDocument();
+            //    doc.remove(0, doc.getLength());
+            //    doc.insertString(0, content, null);
+            //    SaveCookie save = dao.getLookup().lookup(SaveCookie.class);
+            //    save.save();
+            // but then Claude actually gets confused:
+            //    > Error: File has been unexpectedly modified. Read it again before attempting to write it.
+            List<Content> contentList = new ArrayList<>();
+            contentList.add(new Content("text", "FILE_SAVED"));
+            contentList.add(new Content("text", contents.newText()));
+
+            DiffTabTracker.accept(diffTC, new OpenDiffResult().withContent(contentList));
+            // The diff is settled; further clicks must not send another response.
+            approveButton.setEnabled(false);
+
+            // Note: We do not close the diff tab here. Claude Code will close the tab via command.
+        });
+
+        toolbar.add(approveButton, 0);
+        diffTC.add(toolbar, BorderLayout.NORTH);
+        diffTC.add(diffView.getComponent(), BorderLayout.CENTER);
+
+        // Register before opening so a close is always seen as a rejection.
+        for (Object old : DiffTabTracker.register(diffTC, contents.tabName(), handler)) {
+            if (old instanceof TopComponent) {
+                ((TopComponent) old).close();
+            }
+        }
+
+        diffTC.open();
+        diffTC.requestActive();
+    }
+
+    /**
+     * Determines the MIME type used for syntax highlighting in the diff.
+     * Files that do not exist yet are resolved by name alone.
+     *
+     * @param path the file path
+     * @return the MIME type, {@code text/plain} if unknown
+     */
+    static String mimeTypeFor(String path) {
+        File file = new File(path);
+        String mime = null;
+        try {
+            FileObject fo = file.exists() ? FileUtil.toFileObject(FileUtil.normalizeFile(file)) : null;
+            if (fo == null) {
+                fo = FileUtil.createMemoryFileSystem().getRoot().createData(file.getName());
+            }
+            mime = fo.getMIMEType();
+        } catch (IOException | IllegalArgumentException e) {
+            LOGGER.log(Level.FINE, "Cannot determine MIME type of " + path, e);
+        }
+        return (mime == null || "content/unknown".equals(mime)) ? "text/plain" : mime;
+    }
+
+    private static StreamSource source(String name, String title, String mimeType, String text) {
+        return new StreamSource() {
+            @Override
+            public String getName() {
+                return name;
+            }
+
+            @Override
+            public String getTitle() {
+                return title;
+            }
+
+            @Override
+            public String getMIMEType() {
+                return mimeType;
+            }
+
+            @Override
+            public Reader createReader() throws IOException {
+                return new StringReader(text);
+            }
+
+            @Override
+            public Writer createWriter(Difference[] conflicts) throws IOException {
+                throw new IOException("Writing not supported for diff content");
+            }
+        };
     }
 }

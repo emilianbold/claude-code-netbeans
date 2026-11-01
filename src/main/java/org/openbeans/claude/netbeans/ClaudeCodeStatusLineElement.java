@@ -4,6 +4,7 @@ import java.awt.Component;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import javax.swing.JLabel;
+import javax.swing.SwingUtilities;
 import org.openide.awt.StatusLineElementProvider;
 import org.openide.util.Lookup;
 import org.openide.util.lookup.ServiceProvider;
@@ -19,8 +20,16 @@ public class ClaudeCodeStatusLineElement implements StatusLineElementProvider {
     private ClaudeCodeStatusService statusService;
     
     public ClaudeCodeStatusLineElement() {
-        statusService = Lookup.getDefault().lookup(ClaudeCodeStatusService.class);
+        this(Lookup.getDefault().lookup(ClaudeCodeStatusService.class));
+    }
+
+    ClaudeCodeStatusLineElement(ClaudeCodeStatusService statusService) {
+        this.statusService = statusService;
         initializeStatusLabel();
+        if (statusService != null) {
+            // The server starts asynchronously, after this element is created
+            statusService.addChangeListener(e -> SwingUtilities.invokeLater(this::updateStatusDisplay));
+        }
     }
     
     private void initializeStatusLabel() {
@@ -75,11 +84,4 @@ public class ClaudeCodeStatusLineElement implements StatusLineElementProvider {
         return statusLabel;
     }
     
-    /**
-     * Updates the status display. Can be called by other components
-     * when status changes.
-     */
-    public void refresh() {
-        updateStatusDisplay();
-    }
 }

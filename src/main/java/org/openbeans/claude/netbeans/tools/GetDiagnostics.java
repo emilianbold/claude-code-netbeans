@@ -4,12 +4,21 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.File;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.swing.text.Document;
+import javax.swing.text.Element;
+import javax.swing.text.StyledDocument;
 import org.netbeans.editor.AnnotationDesc;
 import org.netbeans.editor.Annotations;
+import org.netbeans.editor.BaseDocument;
+import org.netbeans.spi.editor.hints.ErrorDescription;
+import org.netbeans.spi.editor.hints.Severity;
 import org.openbeans.claude.netbeans.NbUtils;
 import org.openbeans.claude.netbeans.tools.params.Diagnostic;
 import org.openbeans.claude.netbeans.tools.params.DiagnosticsResponse;
@@ -21,8 +30,10 @@ import org.openide.cookies.EditorCookie;
 import org.openide.filesystems.FileObject;
 import org.openide.filesystems.FileUtil;
 import org.openide.loaders.DataObject;
+import org.openide.text.PositionBounds;
 import org.openide.nodes.Node;
 import org.openide.windows.TopComponent;
+import org.openide.windows.WindowManager;
 
 /**
  * Tool to get diagnostic information (errors, warnings) for files.
@@ -30,6 +41,10 @@ import org.openide.windows.TopComponent;
 public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
     
     private static final Logger LOGGER = Logger.getLogger(GetDiagnostics.class.getName());
+
+    private static final Comparator<Diagnostic> BY_POSITION = Comparator
+            .<Diagnostic>comparingInt(d -> d.getRange().getStart().getLine())
+            .thenComparingInt(d -> d.getRange().getStart().getCharacter());
     
     @Override
     public String getName() {
@@ -79,7 +94,7 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
      * Creates a Diagnostic object from annotation data.
      */
     private Diagnostic createDiagnostic(String message, String severity, String source,
-                                      String code, int line, int column) {
+                                      String code, Range range) {
         Diagnostic diagnostic = new Diagnostic();
         diagnostic.setMessage(message);
 
@@ -97,22 +112,52 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
         diagnostic.setSource(source);
         diagnostic.setCode(code);
 
-        // Create range (convert to 0-based line numbers)
-        Start start = new Start();
-        start.setLine(line - 1);
-        start.setCharacter(column);
-
-        End end = new End();
-        end.setLine(line - 1);
-        end.setCharacter(column);
-
-        Range range = new Range();
-        range.setStart(start);
-        range.setEnd(end);
-
         diagnostic.setRange(range);
 
         return diagnostic;
+    }
+    
+    /**
+     * Computes the zero-based range of an annotation. Annotations covering a
+     * whole line (negative length) span to the end of that line; if the
+     * offset is unusable, the start of the given line is used.
+     *
+     * @param doc the document
+     * @param offset annotation start offset
+     * @param length annotation length, negative for the whole line
+     * @param fallbackLine zero-based line to use when the offset is invalid
+     * @return the range
+     */
+    static Range rangeOf(Document doc, int offset, int length, int fallbackLine) {
+        if (!(doc instanceof StyledDocument) || offset < 0 || offset > doc.getLength()) {
+            return range(fallbackLine, 0, fallbackLine, 0);
+        }
+        StyledDocument styled = (StyledDocument) doc;
+        int endOffset;
+        if (length < 0) {
+            Element root = doc.getDefaultRootElement();
+            Element line = root.getElement(root.getElementIndex(offset));
+            endOffset = Math.max(offset, line.getEndOffset() - 1);
+        } else {
+            endOffset = offset + length;
+        }
+        endOffset = Math.min(endOffset, doc.getLength());
+        NbUtils.Position start = NbUtils.position(styled, offset);
+        NbUtils.Position end = NbUtils.position(styled, endOffset);
+        return range(start.line, start.character, end.line, end.character);
+    }
+
+    private static Range range(int startLine, int startChar, int endLine, int endChar) {
+        Start start = new Start();
+        start.setLine(startLine);
+        start.setCharacter(startChar);
+        End end = new End();
+        end.setLine(endLine);
+        end.setCharacter(endChar);
+        Range range = new Range();
+        range.setStart(start);
+        range.setEnd(end);
+        return range;
     }
     
     /**
@@ -121,7 +166,7 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
     private List<DiagnosticsResponse> getDiagnosticsForFile(String uri) {
         try {
             // Convert URI to file path
-            String filePath = uri.startsWith("file://") ? uri.substring(7) : uri;
+            String filePath = NbUtils.toFilePath(uri);
             
             // Security check: Only allow files within open projects
             if (!NbUtils.isPathWithinOpenProjects(filePath)) {
@@ -131,7 +176,7 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
             List<Diagnostic> diagnostics = extractDiagnosticsFromFile(filePath);
             if (!diagnostics.isEmpty()) {
                 DiagnosticsResponse response = new DiagnosticsResponse();
-                response.setUri(URI.create("file://" + filePath));
+                response.setUri(URI.create(NbUtils.toFileUri(filePath)));
                 response.setDiagnostics(diagnostics);
                 return List.of(response);
             }
@@ -144,43 +189,53 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
     }
     
     /**
-     * Gets diagnostics for all currently open files.
+     * Gets diagnostics for all files open in editor windows. Other windows
+     * (Projects, Navigator, ...) are skipped and each file is reported once,
+     * even if it is open in several editors.
      */
     private List<DiagnosticsResponse> getDiagnosticsForAllFiles() {
         try {
             List<DiagnosticsResponse> allResponses = new ArrayList<>();
-            
-            // Go through all open TopComponents (editor tabs)
-            for (TopComponent tc : TopComponent.getRegistry().getOpened()) {
-                Node[] nodes = tc.getActivatedNodes();
-                if (nodes != null && nodes.length > 0) {
-                    DataObject dataObject = nodes[0].getLookup().lookup(DataObject.class);
-                    if (dataObject != null) {
-                        FileObject fileObject = dataObject.getPrimaryFile();
-                        if (fileObject != null) {
-                            File file = FileUtil.toFile(fileObject);
-                            if (file != null) {
-                                List<Diagnostic> fileDiagnostics = extractDiagnosticsFromFile(file.getAbsolutePath());
-                                if (!fileDiagnostics.isEmpty()) {
-                                    DiagnosticsResponse response = new DiagnosticsResponse();
-                                    response.setUri(URI.create("file://" + file.getAbsolutePath()));
-                                    response.setDiagnostics(fileDiagnostics);
-                                    allResponses.add(response);
-                                }
-                            }
-                        }
-                    }
+            for (FileObject fileObject : openEditorFiles()) {
+                File file = FileUtil.toFile(fileObject);
+                if (file == null) {
+                    continue;
+                }
+                List<Diagnostic> fileDiagnostics = extractDiagnosticsFromFile(file.getAbsolutePath());
+                if (!fileDiagnostics.isEmpty()) {
+                    DiagnosticsResponse response = new DiagnosticsResponse();
+                    response.setUri(URI.create(NbUtils.toFileUri(file.getAbsolutePath())));
+                    response.setDiagnostics(fileDiagnostics);
+                    allResponses.add(response);
                 }
             }
-            
             return allResponses;
-            
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Failed to get diagnostics for all files", e);
             return new ArrayList<>();
         }
     }
-    
+
+    /** Files shown in open editor windows, each listed once. */
+    private static Set<FileObject> openEditorFiles() {
+        Set<FileObject> files = new LinkedHashSet<>();
+        WindowManager wm = WindowManager.getDefault();
+        for (TopComponent tc : TopComponent.getRegistry().getOpened()) {
+            if (!wm.isOpenedEditorTopComponent(tc)) {
+                continue;
+            }
+            Node[] nodes = tc.getActivatedNodes();
+            if (nodes == null || nodes.length == 0) {
+                continue;
+            }
+            DataObject dataObject = nodes[0].getLookup().lookup(DataObject.class);
+            if (dataObject != null && dataObject.getPrimaryFile() != null) {
+                files.add(dataObject.getPrimaryFile());
+            }
+        }
+        return files;
+    }
+
     /**
      * Extracts diagnostic information from a specific file using NetBeans editor annotations.
      */
@@ -198,39 +253,19 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
                     
                     if (editorCookie != null) {
                         Document doc = editorCookie.getDocument();
-                        if (doc != null) {
-                            // Get the annotations for this document
-                            Annotations annotations = (Annotations) doc.getProperty(Annotations.class);
-                            
-                            if (annotations != null) {
-                                // Iterate through lines with annotations using NetBeans API
-                                int currentLine = annotations.getNextLineWithAnnotation(-1); // Start from the beginning
-                                
-                                while (currentLine != -1) {
-                                    // Get the active annotation for this line
-                                    AnnotationDesc activeAnnotation = annotations.getActiveAnnotation(currentLine);
-                                    if (activeAnnotation != null) {
-                                        Diagnostic diagnostic = convertAnnotationToDiagnostic(
-                                            activeAnnotation, currentLine + 1, 0);
-                                        if (diagnostic != null) {
-                                            diagnostics.add(diagnostic);
-                                        }
-                                    }
-                                    
-                                    // Get all passive annotations for this line
-                                    AnnotationDesc[] passiveAnnotations = annotations.getPassiveAnnotationsForLine(currentLine);
-                                    if (passiveAnnotations != null) {
-                                        for (AnnotationDesc annotation : passiveAnnotations) {
-                                            Diagnostic diagnostic = convertAnnotationToDiagnostic(
-                                                annotation, currentLine + 1, 0);
-                                            if (diagnostic != null) {
-                                                diagnostics.add(diagnostic);
-                                            }
-                                        }
-                                    }
-                                    
-                                    // Move to the next line with annotations
-                                    currentLine = annotations.getNextLineWithAnnotation(currentLine);
+                        List<ErrorDescription> errors =
+                                doc instanceof StyledDocument ? EditorErrors.forFile(fileObject) : null;
+                        if (errors != null) {
+                            errors.stream()
+                                    .map(error -> fromErrorDescription(error, (StyledDocument) doc))
+                                    .filter(Objects::nonNull)
+                                    .sorted(BY_POSITION)
+                                    .forEach(diagnostics::add);
+                        } else if (doc instanceof BaseDocument) {
+                            for (LineAnnotation a : annotationsOf(((BaseDocument) doc).getAnnotations())) {
+                                Diagnostic diagnostic = convertAnnotationToDiagnostic(a.annotation, doc, a.line);
+                                if (diagnostic != null) {
+                                    diagnostics.add(diagnostic);
                                 }
                             }
                         }
@@ -244,49 +279,154 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
         return diagnostics;
     }
     
+    /** An annotation together with the zero-based line it is attached to. */
+    static final class LineAnnotation {
+        final AnnotationDesc annotation;
+        final int line;
+
+        LineAnnotation(AnnotationDesc annotation, int line) {
+            this.annotation = annotation;
+            this.line = line;
+        }
+    }
+
+    /**
+     * Collects every annotation (active and passive) of a document.
+     * {@link Annotations#getNextLineWithAnnotation(int)} returns the first
+     * annotated line at or after its argument, so the search continues from
+     * the following line.
+     */
+    static List<LineAnnotation> annotationsOf(Annotations annotations) {
+        List<LineAnnotation> result = new ArrayList<>();
+        if (annotations == null) {
+            return result;
+        }
+        int line = annotations.getNextLineWithAnnotation(0);
+        while (line >= 0) {
+            AnnotationDesc active = annotations.getActiveAnnotation(line);
+            if (active != null) {
+                result.add(new LineAnnotation(active, line));
+            }
+            AnnotationDesc[] passive = annotations.getPassiveAnnotationsForLine(line);
+            if (passive != null) {
+                for (AnnotationDesc annotation : passive) {
+                    result.add(new LineAnnotation(annotation, line));
+                }
+            }
+            int next = annotations.getNextLineWithAnnotation(line + 1);
+            if (next <= line) {
+                break;
+            }
+            line = next;
+        }
+        return result;
+    }
+
+    /**
+     * Maps a NetBeans annotation type to a severity. Java errors and warnings
+     * use types such as {@code org-netbeans-spi-editor-hints-parser_annotation_err}
+     * and {@code ..._warn}.
+     *
+     * @return "error", "warning", "hint" or "info"
+     */
+    static String severityOf(String annotationType) {
+        if (annotationType == null) {
+            return "info";
+        }
+        String type = annotationType.toLowerCase();
+        if (type.contains("_err") || type.contains("error")) {
+            return "error";
+        }
+        if (type.contains("warn")) {
+            return "warning";
+        }
+        if (type.contains("hint") || type.contains("verifier")) {
+            return "hint";
+        }
+        return "info";
+    }
+
+    /**
+     * Removes the UI help NetBeans appends to hint descriptions, such as
+     * {@code "\n----\n(Alt-Enter shows hints)"}.
+     *
+     * @return the trimmed message, empty if there is none
+     */
+    static String cleanMessage(String description) {
+        if (description == null) {
+            return "";
+        }
+        return description.replaceFirst("(?s)\\R-{3,}\\R.*$", "").trim();
+    }
+
+    /**
+     * Converts a NetBeans hint (error, warning, ...) to a diagnostic with its
+     * exact range.
+     *
+     * @return the diagnostic, or null if the hint has no message or range
+     */
+    Diagnostic fromErrorDescription(ErrorDescription error, StyledDocument doc) {
+        PositionBounds bounds = error.getRange();
+        if (bounds == null) {
+            return null;
+        }
+        return diagnosticFor(error.getDescription(), error.getSeverity(),
+                bounds.getBegin().getOffset(), bounds.getEnd().getOffset(), doc);
+    }
+
+    /**
+     * Builds a diagnostic for a hint covering the given document offsets.
+     *
+     * @return the diagnostic, or null if there is no message
+     */
+    Diagnostic diagnosticFor(String description, Severity hintSeverity, int start, int end, StyledDocument doc) {
+        String message = cleanMessage(description);
+        if (message.isEmpty()) {
+            return null;
+        }
+        String severity;
+        switch (hintSeverity) {
+            case ERROR:
+                severity = "error";
+                break;
+            case WARNING:
+                severity = "warning";
+                break;
+            default:
+                severity = "hint";
+        }
+        int from = Math.max(0, Math.min(start, doc.getLength()));
+        int to = Math.max(from, Math.min(end, doc.getLength()));
+        NbUtils.Position first = NbUtils.position(doc, from);
+        NbUtils.Position last = NbUtils.position(doc, to);
+        return createDiagnostic(message, severity, "hint".equals(severity) ? "editor" : "compiler", null,
+                range(first.line, first.character, last.line, last.character));
+    }
+
     /**
      * Converts a NetBeans AnnotationDesc to a Diagnostic object.
      */
-    private Diagnostic convertAnnotationToDiagnostic(AnnotationDesc annotation,
-                                                   int lineNumber, int columnNumber) {
+    Diagnostic convertAnnotationToDiagnostic(AnnotationDesc annotation,
+                                                   Document doc, int line) {
         if (annotation == null) {
             return null;
         }
         
-        String message = annotation.getShortDescription();
-        if (message == null || message.trim().isEmpty()) {
+        String severity = severityOf(annotation.getAnnotationType());
+        if ("info".equals(severity)) {
+            // Not a problem marker: override/implements glyphs, bookmarks, breakpoints, ...
             return null;
         }
-        
-        // Try to determine severity from annotation type
-        String severity = "info"; // default
-        String annotationType = annotation.getAnnotationType();
-        String source = "netbeans";
-        
-        if (annotationType != null) {
-            String lowerType = annotationType.toLowerCase();
-            if (lowerType.contains("error")) {
-                severity = "error";
-                source = "compiler";
-            } else if (lowerType.contains("warning") || lowerType.contains("warn")) {
-                severity = "warning";
-                source = "compiler";
-            } else if (lowerType.contains("hint")) {
-                severity = "hint";
-                source = "editor";
-            }
+
+        String message = cleanMessage(annotation.getShortDescription());
+        if (message.isEmpty()) {
+            return null;
         }
-        
-        // Try to extract error code if available
+
+        String source = "hint".equals(severity) ? "editor" : "compiler";
         String code = null;
-        if (message.contains("[") && message.contains("]")) {
-            int start = message.lastIndexOf("[");
-            int end = message.lastIndexOf("]");
-            if (start < end && start >= 0) {
-                code = message.substring(start + 1, end);
-            }
-        }
-        
-        return createDiagnostic(message, severity, source, code, lineNumber, columnNumber);
+
+        return createDiagnostic(message, severity, source, code,
+                rangeOf(doc, annotation.getOffset(), annotation.getLength(), line));
     }
 }

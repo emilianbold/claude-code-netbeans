@@ -2,12 +2,12 @@ package org.openbeans.claude.netbeans.tools;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.logging.Logger;
 import org.netbeans.api.project.Project;
 import org.netbeans.api.project.ProjectUtils;
 import org.netbeans.api.project.ui.OpenProjects;
 import org.openbeans.claude.netbeans.tools.params.GetWorkspaceFoldersParams;
 import org.openbeans.claude.netbeans.tools.params.GetWorkspaceFoldersResult;
+import org.openbeans.claude.netbeans.NbUtils;
 import org.openbeans.claude.netbeans.tools.params.Folder;
 
 /**
@@ -15,7 +15,6 @@ import org.openbeans.claude.netbeans.tools.params.Folder;
  */
 public class GetWorkspaceFolders implements Tool<GetWorkspaceFoldersParams, GetWorkspaceFoldersResult> {
     
-    private static final Logger LOGGER = Logger.getLogger(GetWorkspaceFolders.class.getName());
     
     @Override
     public String getName() {
@@ -73,7 +72,7 @@ public class GetWorkspaceFolders implements Tool<GetWorkspaceFoldersParams, GetW
         for (ProjectData projectData : projectDataList) {
             Folder folder = new Folder();
             folder.setName(projectData.displayName);
-            folder.setUri("file://" + projectData.path);
+            folder.setUri(NbUtils.toFileUri(projectData.path));
             folders.add(folder);
         }
 

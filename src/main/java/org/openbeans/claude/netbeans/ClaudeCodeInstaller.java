@@ -1,6 +1,8 @@
 package org.openbeans.claude.netbeans;
 
 import org.openide.modules.ModuleInstall;
+import javax.swing.event.ChangeListener;
+import org.openide.util.ChangeSupport;
 import org.openide.util.Exceptions;
 import org.openide.util.RequestProcessor;
 import org.openide.util.lookup.ServiceProvider;
@@ -24,6 +26,7 @@ public class ClaudeCodeInstaller extends ModuleInstall implements PropertyChange
     private WebSocketMCPServer mcpServer;
     private NetBeansMCPHandler mcpHandler;
     private LockFileManager lockFileManager;
+    private final ChangeSupport changeSupport = new ChangeSupport(this);
     
     /**
      * Called when the module is first installed.
@@ -60,6 +63,7 @@ public class ClaudeCodeInstaller extends ModuleInstall implements PropertyChange
         if (lockFileManager != null) {
             lockFileManager.removeLockFile();
         }
+        changeSupport.fireChange();
         
         LOGGER.info("Claude Code NetBeans plugin shut down complete");
     }
@@ -121,7 +125,7 @@ public class ClaudeCodeInstaller extends ModuleInstall implements PropertyChange
                     long pid = LockFileManager.getCurrentProcessId();
                     
                     // Create lock file with server information
-                    lockFileManager.createLockFile(port, pid);
+                    lockFileManager.createLockFile(port, pid, mcpServer.getAuthToken());
                     
                     LOGGER.log(Level.INFO, "Claude Code MCP server started on port {0}, PID {1}", 
                               new Object[]{port, pid});
@@ -132,6 +136,8 @@ public class ClaudeCodeInstaller extends ModuleInstall implements PropertyChange
             } catch (Exception e) {
                 LOGGER.log(Level.SEVERE, "Error starting Claude Code MCP server", e);
                 Exceptions.printStackTrace(e);
+            } finally {
+                changeSupport.fireChange();
             }
         });
     }
@@ -216,5 +222,15 @@ public class ClaudeCodeInstaller extends ModuleInstall implements PropertyChange
     @Override
     public boolean isLockFileValid() {
         return lockFileManager != null && lockFileManager.isLockFileValid();
+    }
+
+    @Override
+    public void addChangeListener(ChangeListener listener) {
+        changeSupport.addChangeListener(listener);
+    }
+
+    @Override
+    public void removeChangeListener(ChangeListener listener) {
+        changeSupport.removeChangeListener(listener);
     }
 }

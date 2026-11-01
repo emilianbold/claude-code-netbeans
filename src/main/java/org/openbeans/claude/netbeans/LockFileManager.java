@@ -3,7 +3,6 @@ package org.openbeans.claude.netbeans;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.netbeans.api.project.Project;
-import org.netbeans.api.project.ProjectUtils;
 import org.netbeans.api.project.ui.OpenProjects;
 import org.openide.filesystems.FileObject;
 import org.openide.util.Exceptions;
@@ -13,9 +12,11 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.PosixFilePermission;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
-import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -42,28 +43,17 @@ public class LockFileManager {
      * 
      * @param port The WebSocket server port
      * @param pid The NetBeans process ID
+     * @param authToken The token the WebSocket server requires from clients
      */
-    public void createLockFile(int port, long pid) {
+    public void createLockFile(int port, long pid, String authToken) {
         try {
             // Set the lock file path based on the port
             this.lockFilePath = getLockFilePath(port);
+
+            // Remove lock files left behind by NetBeans instances that crashed
+            cleanStaleLockFiles(lockFilePath.getParent());
             
-            // Ensure the directory exists
-            Files.createDirectories(lockFilePath.getParent());
-            
-            // Create lock file content
-            ObjectNode lockData = objectMapper.createObjectNode();
-            lockData.put("pid", pid);
-            lockData.put("ideName", "NetBeans");
-            lockData.put("transport", "ws");
-            lockData.put("authToken", UUID.randomUUID().toString());
-            
-            // Add workspace folders
-            List<String> workspaceFolders = getWorkspaceFolders();
-            lockData.set("workspaceFolders", objectMapper.valueToTree(workspaceFolders));
-            
-            // Write the lock file
-            objectMapper.writeValue(lockFilePath.toFile(), lockData);
+            writeLockFile(lockFilePath, pid, authToken, getWorkspaceFolders());
             lockFileCreated = true;
             
             LOGGER.log(Level.INFO, "Created Claude Code lock file at: {0}", lockFilePath);
@@ -92,12 +82,99 @@ public class LockFileManager {
             lockData.set("workspaceFolders", objectMapper.valueToTree(workspaceFolders));
             
             // Write back to file
-            objectMapper.writeValue(lockFilePath.toFile(), lockData);
+            writeSecurely(objectMapper, lockFilePath, lockData);
             
             LOGGER.log(Level.FINE, "Updated lock file with new workspace folders");
             
         } catch (IOException e) {
             LOGGER.log(Level.WARNING, "Failed to update lock file", e);
+        }
+    }
+    
+    /**
+     * Deletes NetBeans lock files whose process is no longer running, so
+     * Claude Code does not offer connections to dead IDE instances. Lock
+     * files of other IDEs and unreadable files are left alone.
+     *
+     * @param ideDir the directory containing the lock files
+     */
+    static void cleanStaleLockFiles(Path ideDir) {
+        if (!Files.isDirectory(ideDir)) {
+            return;
+        }
+        ObjectMapper mapper = new ObjectMapper();
+        try (java.nio.file.DirectoryStream<Path> files = Files.newDirectoryStream(ideDir, "*.lock")) {
+            for (Path file : files) {
+                try {
+                    com.fasterxml.jackson.databind.JsonNode data = mapper.readTree(file.toFile());
+                    if (data == null || !"NetBeans".equals(data.path("ideName").asText())
+                            || !data.path("pid").canConvertToLong()) {
+                        continue;
+                    }
+                    long pid = data.get("pid").asLong();
+                    boolean alive = ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false);
+                    if (!alive) {
+                        Files.deleteIfExists(file);
+                        LOGGER.log(Level.INFO, "Removed stale lock file {0} (process {1} is gone)",
+                                new Object[]{file, pid});
+                    }
+                } catch (IOException e) {
+                    LOGGER.log(Level.FINE, "Skipping unreadable lock file " + file, e);
+                }
+            }
+        } catch (IOException e) {
+            LOGGER.log(Level.WARNING, "Failed to scan for stale lock files", e);
+        }
+    }
+
+    /**
+     * Writes a lock file containing the given data.
+     *
+     * @param lockFile path of the lock file
+     * @param pid the NetBeans process ID
+     * @param authToken the token clients must send to connect
+     * @param workspaceFolders the open workspace folders
+     * @throws IOException if writing fails
+     */
+    static void writeLockFile(Path lockFile, long pid, String authToken, List<String> workspaceFolders) throws IOException {
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode lockData = mapper.createObjectNode();
+        lockData.put("pid", pid);
+        lockData.put("ideName", "NetBeans");
+        lockData.put("transport", "ws");
+        lockData.put("authToken", authToken);
+        lockData.set("workspaceFolders", mapper.valueToTree(workspaceFolders));
+        writeSecurely(mapper, lockFile, lockData);
+    }
+
+    /**
+     * Writes JSON to a file readable only by the current user. The data is
+     * written to a temporary file (created with owner-only permissions) and
+     * then atomically moved into place, so the auth token is never exposed
+     * and readers never see a partially written file.
+     */
+    private static void writeSecurely(ObjectMapper mapper, Path target, ObjectNode data) throws IOException {
+        Path dir = target.toAbsolutePath().getParent();
+        Files.createDirectories(dir);
+        // createTempFile uses owner-only permissions on POSIX file systems
+        Path tmp = Files.createTempFile(dir, ".lock-", ".tmp");
+        try {
+            mapper.writeValue(tmp.toFile(), data);
+            restrictToOwner(tmp);
+            try {
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(tmp);
+        }
+    }
+
+    private static void restrictToOwner(Path file) throws IOException {
+        if (file.getFileSystem().supportedFileAttributeViews().contains("posix")) {
+            Files.setPosixFilePermissions(file,
+                    EnumSet.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE));
         }
     }
     
@@ -158,13 +235,7 @@ public class LockFileManager {
      * @return Process ID
      */
     public static long getCurrentProcessId() {
-        try {
-            String processName = java.lang.management.ManagementFactory.getRuntimeMXBean().getName();
-            return Long.parseLong(processName.split("@")[0]);
-        } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Could not determine process ID", e);
-            return -1;
-        }
+        return ProcessHandle.current().pid();
     }
     
     /**
