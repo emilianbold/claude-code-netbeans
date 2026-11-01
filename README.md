@@ -141,8 +141,7 @@ src/main/java/org/openbeans/claude/netbeans/
 └── ClaudeCodeAction.java         # Status action
 
 src/main/resources/
-├── org/openbeans/claude/netbeans/Bundle.properties
-└── META-INF/services/org.openide.modules.ModuleInstall
+└── org/openbeans/claude/netbeans/Bundle.properties
 
 src/main/nbm/
 └── manifest.mf                   # Plugin manifest

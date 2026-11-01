@@ -2,7 +2,6 @@ package org.openbeans.claude.netbeans.tools;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.logging.Logger;
 import org.netbeans.api.project.Project;
 import org.netbeans.api.project.ProjectUtils;
 import org.netbeans.api.project.ui.OpenProjects;
@@ -16,7 +15,6 @@ import org.openbeans.claude.netbeans.tools.params.Folder;
  */
 public class GetWorkspaceFolders implements Tool<GetWorkspaceFoldersParams, GetWorkspaceFoldersResult> {
     
-    private static final Logger LOGGER = Logger.getLogger(GetWorkspaceFolders.class.getName());
     
     @Override
     public String getName() {

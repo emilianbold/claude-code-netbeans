@@ -3,7 +3,6 @@ package org.openbeans.claude.netbeans;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.netbeans.api.project.Project;
-import org.netbeans.api.project.ProjectUtils;
 import org.netbeans.api.project.ui.OpenProjects;
 import org.openide.filesystems.FileObject;
 import org.openide.util.Exceptions;
