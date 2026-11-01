@@ -5,7 +5,11 @@ import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.websocket.server.config.JettyWebSocketServletContainerInitializer;
 
+import java.net.InetAddress;
 import java.net.ServerSocket;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -18,10 +22,17 @@ public class WebSocketMCPServer {
     private static final Logger LOGGER = Logger.getLogger(WebSocketMCPServer.class.getName());
     private static final int PORT_RANGE_START = 8990;
     private static final int PORT_RANGE_END = 9100;
+
+    /** Header in which Claude Code sends the token from the lock file. */
+    static final String AUTH_HEADER = "x-claude-code-ide-authorization";
+
+    /** Only accept connections on the loopback interface. */
+    private static final String BIND_HOST = "127.0.0.1";
     
     private Server server;
     private int port;
     private final NetBeansMCPHandler mcpHandler;
+    private final String authToken = UUID.randomUUID().toString();
     
     public WebSocketMCPServer(NetBeansMCPHandler mcpHandler) {
         this.mcpHandler = mcpHandler;
@@ -44,6 +55,7 @@ public class WebSocketMCPServer {
             // Create Jetty server
             server = new Server();
             ServerConnector connector = new ServerConnector(server);
+            connector.setHost(BIND_HOST);
             connector.setPort(port);
             server.addConnector(connector);
             
@@ -61,6 +73,22 @@ public class WebSocketMCPServer {
                 
                 // Add WebSocket endpoint with subprotocol negotiation
                 wsContainer.addMapping("/", (upgradeRequest, upgradeResponse) -> {
+                    // Reject browsers: any web page can open a WebSocket to localhost,
+                    // but browsers always send an Origin header and the CLI does not.
+                    String origin = upgradeRequest.getHeader("Origin");
+                    if (origin != null) {
+                        LOGGER.log(Level.WARNING, "Rejected WebSocket connection with Origin: {0}", origin);
+                        reject(upgradeResponse, "Browser connections are not allowed");
+                        return null;
+                    }
+
+                    // Require the auth token published in the lock file
+                    if (!isValidToken(upgradeRequest.getHeader(AUTH_HEADER))) {
+                        LOGGER.warning("Rejected WebSocket connection with missing or invalid auth token");
+                        reject(upgradeResponse, "Invalid or missing authentication token");
+                        return null;
+                    }
+
                     // Handle MCP subprotocol negotiation
                     java.util.List<String> subprotocols = upgradeRequest.getSubProtocols();
                     if (subprotocols != null) {
@@ -103,6 +131,42 @@ public class WebSocketMCPServer {
     }
     
     /**
+     * Gets the token clients must present in the {@value #AUTH_HEADER} header.
+     *
+     * @return the auth token for this server instance
+     */
+    public String getAuthToken() {
+        return authToken;
+    }
+
+    /**
+     * Gets the host the server is bound to.
+     *
+     * @return bind address
+     */
+    public String getHost() {
+        return BIND_HOST;
+    }
+
+    private boolean isValidToken(String presented) {
+        if (presented == null) {
+            return false;
+        }
+        // Constant-time comparison to avoid leaking the token through timing
+        return MessageDigest.isEqual(
+                presented.getBytes(StandardCharsets.UTF_8),
+                authToken.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void reject(org.eclipse.jetty.websocket.server.JettyServerUpgradeResponse response, String message) {
+        try {
+            response.sendForbidden(message);
+        } catch (java.io.IOException e) {
+            LOGGER.log(Level.FINE, "Failed to send 403 response", e);
+        }
+    }
+    
+    /**
      * Gets the port the server is running on.
      * 
      * @return server port
@@ -127,7 +191,7 @@ public class WebSocketMCPServer {
      */
     private int findAvailablePort() {
         for (int port = PORT_RANGE_START; port <= PORT_RANGE_END; port++) {
-            try (ServerSocket socket = new ServerSocket(port)) {
+            try (ServerSocket socket = new ServerSocket(port, 1, InetAddress.getByName(BIND_HOST))) {
                 return port;
             } catch (Exception e) {
                 // Port is in use, try next one

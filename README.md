@@ -113,10 +113,19 @@ Claude Code CLI → WebSocket → NetBeans Plugin → NetBeans IDE APIs
   "pid": 12345,
   "ideName": "NetBeans",
   "transport": "ws",
-  "port": 8991,
+  "authToken": "<random UUID>",
   "workspaceFolders": ["/path/to/project"]
 }
 ```
+
+The port is encoded in the file name (`~/.claude/ide/{port}.lock`).
+
+### Security
+
+- The WebSocket server listens on `127.0.0.1` only and is not reachable from other machines.
+- Every connection must send the lock file's `authToken` in the `x-claude-code-ide-authorization` header; otherwise the upgrade is rejected with HTTP 403.
+- Connections that carry an `Origin` header (i.e. from a web browser) are rejected, so web pages cannot talk to the IDE.
+- The lock file is written with owner-only permissions (`0600`) on POSIX systems.
 
 ## Development
 
@@ -169,9 +178,20 @@ mvn clean package
 - Review plugin status: **Tools > Claude Code Status**
 
 ### WebSocket Connection Issues
-- Check firewall settings for the port range (8990-9100)
-- Verify no other applications are using the ports
+- The server only listens on `127.0.0.1`; connections from other hosts are not supported
+- Verify no other applications are using the ports (8990-9100)
+- Look for "Rejected WebSocket connection" in the IDE log (missing/invalid token or browser origin)
 - Review NetBeans and plugin logs
+
+## TODO
+
+- **Expose NetBeans code intelligence to Claude Code.** Add MCP tools backed by NetBeans' language infrastructure (e.g. the Java source index) so Claude can use the IDE's semantic understanding instead of text search:
+  - find usages / references of a symbol
+  - go to definition / declaration
+  - type hierarchy and call hierarchy
+  - workspace symbol search
+  - project-wide diagnostics (not only for files open in the editor)
+  - refactorings such as rename
 
 ## Contributing
 

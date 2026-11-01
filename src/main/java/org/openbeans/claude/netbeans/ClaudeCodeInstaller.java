@@ -121,7 +121,7 @@ public class ClaudeCodeInstaller extends ModuleInstall implements PropertyChange
                     long pid = LockFileManager.getCurrentProcessId();
                     
                     // Create lock file with server information
-                    lockFileManager.createLockFile(port, pid);
+                    lockFileManager.createLockFile(port, pid, mcpServer.getAuthToken());
                     
                     LOGGER.log(Level.INFO, "Claude Code MCP server started on port {0}, PID {1}", 
                               new Object[]{port, pid});
