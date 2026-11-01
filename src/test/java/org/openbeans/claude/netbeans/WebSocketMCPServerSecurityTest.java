@@ -6,7 +6,6 @@ import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
-import org.eclipse.jetty.websocket.api.Session;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,8 +22,12 @@ public class WebSocketMCPServerSecurityTest {
     /** Handler that does not touch the NetBeans window system. */
     private static class NoUiHandler extends NetBeansMCPHandler {
         @Override
-        public void setWebSocketSession(Session session) {
+        void startTracking() {
             // no selection / diff tracking in tests
+        }
+
+        @Override
+        void stopTracking() {
         }
     }
 

@@ -33,7 +33,7 @@ public class MCPWebSocketHandler extends WebSocketAdapter {
                   session.getRemoteAddress());
         
         // Register this session with the MCP handler
-        mcpHandler.setWebSocketSession(session);
+        mcpHandler.sessionOpened(session);
     }
     
     @Override
@@ -54,7 +54,9 @@ public class MCPWebSocketHandler extends WebSocketAdapter {
         }
 
         // handleMessage never throws and returns null when no response is due
-        String response = mcpHandler.handleMessage(messageNode);
+        Session session = getSession();
+        String response = mcpHandler.handleMessage(messageNode,
+                asyncResponse -> NetBeansMCPHandler.sendTo(session, asyncResponse));
         if (response != null) {
             sendText(response);
             LOGGER.log(Level.FINE, "Sent MCP response: {0}", response);
@@ -67,12 +69,15 @@ public class MCPWebSocketHandler extends WebSocketAdapter {
     
     @Override
     public void onWebSocketClose(int statusCode, String reason) {
+        Session session = getSession();
         super.onWebSocketClose(statusCode, reason);
         LOGGER.log(Level.INFO, "Claude Code WebSocket connection closed: {0} - {1}", 
                   new Object[]{statusCode, reason});
         
         // Unregister this session
-        mcpHandler.setWebSocketSession(null);
+        if (session != null) {
+            mcpHandler.sessionClosed(session);
+        }
     }
     
     @Override

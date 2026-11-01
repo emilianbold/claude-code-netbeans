@@ -275,4 +275,62 @@ public class NetBeansMCPHandlerProtocolTest {
         JsonNode result = toolResult(handler(), "thread", "{}");
         assertEquals("true", result.get("content").get(0).get("text").asText());
     }
+
+    // --- sessions ---
+
+    @Test
+    public void asyncResultGoesToRequestingSessionOnly() throws Exception {
+        TestHandler h = handler();
+        List<String> replies = new ArrayList<>();
+        String sync = h.handleMessage(mapper.readTree(
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"async\"}}"),
+                replies::add);
+        assertNull(sync);
+        assertEquals(1, replies.size());
+        assertTrue(h.sent.isEmpty(), "must not be broadcast to other sessions");
+    }
+
+    private static org.eclipse.jetty.websocket.api.Session fakeSession() {
+        return (org.eclipse.jetty.websocket.api.Session) java.lang.reflect.Proxy.newProxyInstance(
+                NetBeansMCPHandlerProtocolTest.class.getClassLoader(),
+                new Class<?>[]{org.eclipse.jetty.websocket.api.Session.class},
+                (proxy, method, args) -> {
+                    switch (method.getName()) {
+                        case "equals": return proxy == args[0];
+                        case "hashCode": return System.identityHashCode(proxy);
+                        case "isOpen": return Boolean.TRUE;
+                        default: return null;
+                    }
+                });
+    }
+
+    @Test
+    public void trackingRunsFromFirstSessionUntilLastSessionCloses() throws Exception {
+        int[] starts = new int[1];
+        int[] stops = new int[1];
+        NetBeansMCPHandler h = new NetBeansMCPHandler(List.of()) {
+            @Override
+            void startTracking() {
+                starts[0]++;
+            }
+
+            @Override
+            void stopTracking() {
+                stops[0]++;
+            }
+        };
+        org.eclipse.jetty.websocket.api.Session first = fakeSession();
+        org.eclipse.jetty.websocket.api.Session second = fakeSession();
+
+        h.sessionOpened(first);
+        h.sessionOpened(second);
+        h.sessionClosed(first);
+        javax.swing.SwingUtilities.invokeAndWait(() -> { });
+        assertEquals(1, starts[0]);
+        assertEquals(0, stops[0], "closing one of two sessions must not stop tracking");
+
+        h.sessionClosed(second);
+        javax.swing.SwingUtilities.invokeAndWait(() -> { });
+        assertEquals(1, stops[0]);
+    }
 }

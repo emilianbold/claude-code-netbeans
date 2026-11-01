@@ -32,6 +32,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.function.Consumer;
 import java.util.WeakHashMap;
 import java.util.List;
 import java.util.ArrayList;
@@ -67,7 +70,8 @@ public class NetBeansMCPHandler {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final MCPResponseBuilder responseBuilder;
-    private volatile Session webSocketSession;
+    /** All connected Claude Code sessions. */
+    private final Set<Session> sessions = new CopyOnWriteArraySet<>();
     
     // Selection tracking
     private final Map<JTextComponent, CaretListener> selectionListeners = new WeakHashMap<>();
@@ -111,13 +115,25 @@ public class NetBeansMCPHandler {
     }
     
     /**
-     * Handles an incoming JSON-RPC message and routes it to the appropriate handler.
-     * Notifications (messages without an id) never get a response.
-     * 
+     * Handles a message, sending any delayed (async) response to all sessions.
+     *
      * @param message the JSON-RPC message
      * @return response JSON string, or null if no response must be sent
      */
     public String handleMessage(JsonNode message) {
+        return handleMessage(message, this::send);
+    }
+
+    /**
+     * Handles an incoming JSON-RPC message and routes it to the appropriate handler.
+     * Notifications (messages without an id) never get a response.
+     * 
+     * @param message the JSON-RPC message
+     * @param asyncReply where to send a delayed tool response, i.e. the
+     *                   session the request came from
+     * @return response JSON string, or null if no response must be sent
+     */
+    public String handleMessage(JsonNode message, Consumer<String> asyncReply) {
         JsonNode id = message.get("id");
         boolean isNotification = id == null;
         String method = message.path("method").isTextual() ? message.get("method").asText() : null;
@@ -153,7 +169,7 @@ public class NetBeansMCPHandler {
                     result = handleToolsList();
                     break;
                 case "tools/call":
-                    result = handleToolsCall(params, id);
+                    result = handleToolsCall(params, id, asyncReply);
                     if (result == null) {
                         // Async tool - the response is sent later
                         return null;
@@ -233,7 +249,7 @@ public class NetBeansMCPHandler {
      * @param requestId Request ID for async response handling
      * @return the CallToolResult for sync tools, null for async tools
      */
-    private JsonNode handleToolsCall(JsonNode params, JsonNode requestId) throws ProtocolException {
+    private JsonNode handleToolsCall(JsonNode params, JsonNode requestId, Consumer<String> asyncReply) throws ProtocolException {
         if (params == null || !params.path("name").isTextual()) {
             throw new ProtocolException(MCPResponseBuilder.INVALID_PARAMS, "Missing tool name");
         }
@@ -257,7 +273,7 @@ public class NetBeansMCPHandler {
         if (result instanceof AsyncResponse) {
             @SuppressWarnings("unchecked")
             AsyncResponse<Object> async = (AsyncResponse<Object>) result;
-            async.setHandler(finalResult -> sendAsyncToolResponse(requestId, finalResult));
+            async.setHandler(finalResult -> sendAsyncToolResponse(requestId, finalResult, asyncReply));
             return null;
         }
         return responseBuilder.createToolResponse(result);
@@ -289,11 +305,11 @@ public class NetBeansMCPHandler {
      * @param requestId The original request ID
      * @param result The tool result to send
      */
-    private void sendAsyncToolResponse(JsonNode requestId, Object result) {
+    private void sendAsyncToolResponse(JsonNode requestId, Object result, Consumer<String> reply) {
         try {
             String message = objectMapper.writeValueAsString(
                     responseBuilder.createResponse(requestId, responseBuilder.createToolResponse(result)));
-            send(message);
+            reply.accept(message);
             LOGGER.log(Level.INFO, "Sent async tool response for request ID: {0}", requestId);
         } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Error sending async tool response", e);
@@ -306,10 +322,25 @@ public class NetBeansMCPHandler {
      * @param message serialized JSON-RPC message
      */
     void send(String message) {
-        // Sent from a background thread so callers on the EDT (caret
-        // listeners, the diff Approve button) never block on socket I/O.
-        // The single-threaded processor also keeps messages in order.
-        SEND_RP.post(() -> sendNow(webSocketSession, message));
+        SEND_RP.post(() -> {
+            for (Session session : sessions) {
+                sendNow(session, message);
+            }
+        });
+    }
+
+    /**
+     * Sends a message to one session.
+     *
+     * Messages are sent from a background thread so callers on the EDT
+     * (caret listeners, the diff Approve button) never block on socket I/O.
+     * The single-threaded processor also keeps messages in order.
+     *
+     * @param session target session
+     * @param message serialized JSON-RPC message
+     */
+    static void sendTo(Session session, String message) {
+        SEND_RP.post(() -> sendNow(session, message));
     }
 
     /**
@@ -428,21 +459,48 @@ public class NetBeansMCPHandler {
         return tool;
     }
     
-    public void setWebSocketSession(Session session) {
-        this.webSocketSession = session;
-        
-        // Listeners on Swing components and the window system belong on the EDT
-        SwingUtilities.invokeLater(() -> {
-            if (session != null) {
-                // Start tracking selection changes and diff tabs when connected
-                startSelectionTracking();
-                startDiffTabTracking();
-            } else {
-                // Stop tracking when disconnected
-                stopSelectionTracking();
-                stopDiffTabTracking();
-            }
-        });
+    /**
+     * Registers a newly connected session. Editor tracking starts with the
+     * first session.
+     *
+     * @param session the connected session
+     */
+    public void sessionOpened(Session session) {
+        boolean first;
+        synchronized (sessions) {
+            first = sessions.isEmpty();
+            sessions.add(session);
+        }
+        if (first) {
+            SwingUtilities.invokeLater(this::startTracking);
+        }
+    }
+
+    /**
+     * Unregisters a closed session. Editor tracking stops with the last one.
+     *
+     * @param session the closed session
+     */
+    public void sessionClosed(Session session) {
+        boolean last;
+        synchronized (sessions) {
+            last = sessions.remove(session) && sessions.isEmpty();
+        }
+        if (last) {
+            SwingUtilities.invokeLater(this::stopTracking);
+        }
+    }
+
+    /** Starts selection and diff tab tracking. Called on the EDT. */
+    void startTracking() {
+        startSelectionTracking();
+        startDiffTabTracking();
+    }
+
+    /** Stops selection and diff tab tracking. Called on the EDT. */
+    void stopTracking() {
+        stopSelectionTracking();
+        stopDiffTabTracking();
     }
     
     /**
@@ -576,7 +634,7 @@ public class NetBeansMCPHandler {
      */
     private void sendSelectionChangeEvent(JTextComponent textComponent, Node node) {
         try {
-            if (webSocketSession == null || !webSocketSession.isOpen()) {
+            if (sessions.isEmpty()) {
                 return;
             }
             
