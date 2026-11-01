@@ -91,6 +91,12 @@ public class NetBeansMCPHandlerProtocolTest {
                 throw new IllegalStateException("boom");
             }
         });
+        tools.add(new FakeTool<String>("thread") {
+            @Override
+            public String run(EchoParams p) {
+                return String.valueOf(javax.swing.SwingUtilities.isEventDispatchThread());
+            }
+        });
         tools.add(new FakeTool<AsyncResponse<Pojo>>("async") {
             @Override
             public AsyncResponse<Pojo> run(EchoParams p) {
@@ -260,5 +266,13 @@ public class NetBeansMCPHandlerProtocolTest {
         JsonNode r = mapper.readTree(h.sent.get(0));
         assertEquals("req-9", r.get("id").asText());
         assertNotNull(r.get("result").get("content"));
+    }
+
+    // --- threading ---
+
+    @Test
+    public void toolsRunOnEventDispatchThread() throws Exception {
+        JsonNode result = toolResult(handler(), "thread", "{}");
+        assertEquals("true", result.get("content").get(0).get("text").asText());
     }
 }

@@ -12,7 +12,11 @@ import org.openide.filesystems.FileObject;
 import org.openide.filesystems.FileUtil;
 import org.openide.loaders.DataObject;
 import org.openide.nodes.Node;
+import org.openide.util.Mutex;
+import org.openide.util.MutexException;
+import org.openide.util.RequestProcessor;
 import org.openide.windows.TopComponent;
+import javax.swing.SwingUtilities;
 
 import javax.swing.text.Document;
 import javax.swing.text.JTextComponent;
@@ -59,6 +63,7 @@ public class NetBeansMCPHandler {
 
     private static final Logger LOGGER = Logger.getLogger(NetBeansMCPHandler.class.getName());
     private static final String PROTOCOL_VERSION = "2024-11-05";
+    private static final RequestProcessor SEND_RP = new RequestProcessor("ClaudeCode-send", 1);
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final MCPResponseBuilder responseBuilder;
@@ -271,7 +276,12 @@ public class NetBeansMCPHandler {
         } catch (IllegalArgumentException e) {
             throw new InvalidArgumentsException(e);
         }
-        return tool.run(parsed);
+        // NetBeans window system and editor APIs must be used on the EDT
+        try {
+            return Mutex.EVENT.readAccess((Mutex.ExceptionAction<Object>) () -> tool.run(parsed));
+        } catch (MutexException e) {
+            throw e.getException();
+        }
     }
 
     /**
@@ -296,15 +306,30 @@ public class NetBeansMCPHandler {
      * @param message serialized JSON-RPC message
      */
     void send(String message) {
-        Session session = webSocketSession;
+        // Sent from a background thread so callers on the EDT (caret
+        // listeners, the diff Approve button) never block on socket I/O.
+        // The single-threaded processor also keeps messages in order.
+        SEND_RP.post(() -> sendNow(webSocketSession, message));
+    }
+
+    /**
+     * Writes a message to a session. Writes to the same session are
+     * serialized, since several threads may send concurrently.
+     *
+     * @param session target session, may be null
+     * @param message serialized JSON-RPC message
+     */
+    static void sendNow(Session session, String message) {
         if (session == null || !session.isOpen()) {
             LOGGER.warning("Cannot send message - WebSocket not open");
             return;
         }
-        try {
-            session.getRemote().sendString(message);
-        } catch (IOException e) {
-            LOGGER.log(Level.WARNING, "Failed to send WebSocket message", e);
+        synchronized (session) {
+            try {
+                session.getRemote().sendString(message);
+            } catch (IOException e) {
+                LOGGER.log(Level.WARNING, "Failed to send WebSocket message", e);
+            }
         }
     }
     
@@ -406,15 +431,18 @@ public class NetBeansMCPHandler {
     public void setWebSocketSession(Session session) {
         this.webSocketSession = session;
         
-        if (session != null) {
-            // Start tracking selection changes and diff tabs when connected
-            startSelectionTracking();
-            startDiffTabTracking();
-        } else {
-            // Stop tracking when disconnected
-            stopSelectionTracking();
-            stopDiffTabTracking();
-        }
+        // Listeners on Swing components and the window system belong on the EDT
+        SwingUtilities.invokeLater(() -> {
+            if (session != null) {
+                // Start tracking selection changes and diff tabs when connected
+                startSelectionTracking();
+                startDiffTabTracking();
+            } else {
+                // Stop tracking when disconnected
+                stopSelectionTracking();
+                stopDiffTabTracking();
+            }
+        });
     }
     
     /**

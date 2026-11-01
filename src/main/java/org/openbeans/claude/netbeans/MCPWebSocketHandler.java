@@ -6,7 +6,6 @@ import org.eclipse.jetty.websocket.api.Session;
 import org.eclipse.jetty.websocket.api.WebSocketAdapter;
 import org.eclipse.jetty.websocket.api.annotations.WebSocket;
 
-import java.io.IOException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -63,13 +62,7 @@ public class MCPWebSocketHandler extends WebSocketAdapter {
     }
 
     private void sendText(String text) {
-        try {
-            if (getSession() != null && getSession().isOpen()) {
-                getSession().getRemote().sendString(text);
-            }
-        } catch (IOException e) {
-            LOGGER.log(Level.WARNING, "Failed to send WebSocket message", e);
-        }
+        NetBeansMCPHandler.sendNow(getSession(), text);
     }
     
     @Override
