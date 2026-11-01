@@ -121,7 +121,7 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
     private List<DiagnosticsResponse> getDiagnosticsForFile(String uri) {
         try {
             // Convert URI to file path
-            String filePath = uri.startsWith("file://") ? uri.substring(7) : uri;
+            String filePath = NbUtils.toFilePath(uri);
             
             // Security check: Only allow files within open projects
             if (!NbUtils.isPathWithinOpenProjects(filePath)) {
@@ -131,7 +131,7 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
             List<Diagnostic> diagnostics = extractDiagnosticsFromFile(filePath);
             if (!diagnostics.isEmpty()) {
                 DiagnosticsResponse response = new DiagnosticsResponse();
-                response.setUri(URI.create("file://" + filePath));
+                response.setUri(URI.create(NbUtils.toFileUri(filePath)));
                 response.setDiagnostics(diagnostics);
                 return List.of(response);
             }
@@ -163,7 +163,7 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
                                 List<Diagnostic> fileDiagnostics = extractDiagnosticsFromFile(file.getAbsolutePath());
                                 if (!fileDiagnostics.isEmpty()) {
                                     DiagnosticsResponse response = new DiagnosticsResponse();
-                                    response.setUri(URI.create("file://" + file.getAbsolutePath()));
+                                    response.setUri(URI.create(NbUtils.toFileUri(file.getAbsolutePath())));
                                     response.setDiagnostics(fileDiagnostics);
                                     allResponses.add(response);
                                 }

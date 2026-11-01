@@ -654,8 +654,12 @@ public class NetBeansMCPHandler {
                 if (fileObject != null) {
                     // Get file path
                     File file = FileUtil.toFile(fileObject);
+                    if (file == null) {
+                        // Not a local file (e.g. inside a JAR)
+                        return;
+                    }
                     String absolutePath = file.getAbsolutePath();
-                    String fileUrl = "file://" + absolutePath;
+                    String fileUrl = NbUtils.toFileUri(absolutePath);
                     
                     // Calculate line and column positions (0-based for protocol)
                     int startLine = NbDocument.findLineNumber(styledDoc, selectionStart);

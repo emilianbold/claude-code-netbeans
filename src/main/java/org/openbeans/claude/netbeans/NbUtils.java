@@ -3,6 +3,8 @@ package org.openbeans.claude.netbeans;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.io.File;
 import java.io.IOException;
+import java.net.URI;
+import java.nio.file.Paths;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.swing.text.JTextComponent;
@@ -105,6 +107,46 @@ public class NbUtils {
         return new SelectionData(selectedText, filePath, startLine, startColumn, endLine, endColumn);
     }
  
+    /**
+     * Converts a local path to a properly encoded file URI, e.g.
+     * {@code /a b/C.java} becomes {@code file:///a%20b/C.java}. Directory
+     * URIs are returned without a trailing slash.
+     *
+     * @param path absolute file system path
+     * @return the file URI
+     */
+    public static String toFileUri(String path) {
+        String uri = Paths.get(path).toAbsolutePath().toUri().toString();
+        if (uri.endsWith("/") && !uri.equals("file:///")) {
+            uri = uri.substring(0, uri.length() - 1);
+        }
+        return uri;
+    }
+
+    /**
+     * Converts a file URI (or a plain path) to a local path. Percent-encoded
+     * characters are decoded. Unencoded URIs such as {@code file:///a b/c}
+     * are accepted as well.
+     *
+     * @param uriOrPath a {@code file:} URI or a path
+     * @return the local file system path
+     */
+    public static String toFilePath(String uriOrPath) {
+        if (!uriOrPath.startsWith("file:")) {
+            return uriOrPath;
+        }
+        try {
+            return Paths.get(URI.create(uriOrPath)).toString();
+        } catch (IllegalArgumentException | java.nio.file.FileSystemNotFoundException e) {
+            // Not a valid URI (e.g. unencoded spaces): strip the scheme
+            String rest = uriOrPath.substring("file:".length());
+            if (rest.startsWith("//")) {
+                rest = rest.substring(2);
+            }
+            return rest;
+        }
+    }
+
     /**
      * Security validation: Checks if the given file path is within any open project directory.
      * This prevents unauthorized file operations outside of the user's active workspace.
