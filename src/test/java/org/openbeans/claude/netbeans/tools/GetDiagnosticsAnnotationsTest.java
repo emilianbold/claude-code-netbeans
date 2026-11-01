@@ -114,4 +114,46 @@ public class GetDiagnosticsAnnotationsTest {
                 "org-netbeans-modules-java-editor-implements-annotation",
                 "Implements method from : Tool", 0, 0), doc, 0));
     }
+
+    @Test
+    public void usesTheExactRangeOfAHint() throws Exception {
+        var doc = new org.netbeans.modules.editor.NbEditorDocument("text/plain");
+        doc.insertString(0, "class A {\n    int x = \"oops\";\n}\n", null);
+        int start = doc.getText(0, doc.getLength()).indexOf("\"oops\"");
+
+        var diagnostic = new GetDiagnostics().diagnosticFor("incompatible types",
+                org.netbeans.spi.editor.hints.Severity.ERROR, start, start + 6, doc);
+
+        assertEquals("incompatible types", diagnostic.getMessage());
+        assertEquals("compiler", diagnostic.getSource());
+        assertEquals(1, diagnostic.getRange().getStart().getLine());
+        assertEquals(12, diagnostic.getRange().getStart().getCharacter());
+        assertEquals(1, diagnostic.getRange().getEnd().getLine());
+        assertEquals(18, diagnostic.getRange().getEnd().getCharacter());
+    }
+
+    @Test
+    public void verifierHintsAreReportedAsHints() throws Exception {
+        var doc = new org.netbeans.modules.editor.NbEditorDocument("text/plain");
+        doc.insertString(0, "try {} catch (Exception e) {}\n", null);
+
+        var diagnostic = new GetDiagnostics().diagnosticFor("Use multicatch",
+                org.netbeans.spi.editor.hints.Severity.VERIFIER, 7, 26, doc);
+
+        assertEquals("editor", diagnostic.getSource());
+        assertEquals(7, diagnostic.getRange().getStart().getCharacter());
+        assertEquals(26, diagnostic.getRange().getEnd().getCharacter());
+    }
+
+    @Test
+    public void clampsRangesToTheDocument() throws Exception {
+        var doc = new org.netbeans.modules.editor.NbEditorDocument("text/plain");
+        doc.insertString(0, "abc", null);
+
+        var diagnostic = new GetDiagnostics().diagnosticFor("x",
+                org.netbeans.spi.editor.hints.Severity.WARNING, 2, 99, doc);
+
+        assertEquals(2, diagnostic.getRange().getStart().getCharacter());
+        assertEquals(3, diagnostic.getRange().getEnd().getCharacter());
+    }
 }

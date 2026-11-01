@@ -4,8 +4,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.File;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -15,6 +17,8 @@ import javax.swing.text.StyledDocument;
 import org.netbeans.editor.AnnotationDesc;
 import org.netbeans.editor.Annotations;
 import org.netbeans.editor.BaseDocument;
+import org.netbeans.spi.editor.hints.ErrorDescription;
+import org.netbeans.spi.editor.hints.Severity;
 import org.openbeans.claude.netbeans.NbUtils;
 import org.openbeans.claude.netbeans.tools.params.Diagnostic;
 import org.openbeans.claude.netbeans.tools.params.DiagnosticsResponse;
@@ -26,6 +30,7 @@ import org.openide.cookies.EditorCookie;
 import org.openide.filesystems.FileObject;
 import org.openide.filesystems.FileUtil;
 import org.openide.loaders.DataObject;
+import org.openide.text.PositionBounds;
 import org.openide.nodes.Node;
 import org.openide.windows.TopComponent;
 import org.openide.windows.WindowManager;
@@ -36,6 +41,10 @@ import org.openide.windows.WindowManager;
 public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
     
     private static final Logger LOGGER = Logger.getLogger(GetDiagnostics.class.getName());
+
+    private static final Comparator<Diagnostic> BY_POSITION = Comparator
+            .<Diagnostic>comparingInt(d -> d.getRange().getStart().getLine())
+            .thenComparingInt(d -> d.getRange().getStart().getCharacter());
     
     @Override
     public String getName() {
@@ -244,7 +253,15 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
                     
                     if (editorCookie != null) {
                         Document doc = editorCookie.getDocument();
-                        if (doc instanceof BaseDocument) {
+                        List<ErrorDescription> errors =
+                                doc instanceof StyledDocument ? EditorErrors.forFile(fileObject) : null;
+                        if (errors != null) {
+                            errors.stream()
+                                    .map(error -> fromErrorDescription(error, (StyledDocument) doc))
+                                    .filter(Objects::nonNull)
+                                    .sorted(BY_POSITION)
+                                    .forEach(diagnostics::add);
+                        } else if (doc instanceof BaseDocument) {
                             for (LineAnnotation a : annotationsOf(((BaseDocument) doc).getAnnotations())) {
                                 Diagnostic diagnostic = convertAnnotationToDiagnostic(a.annotation, doc, a.line);
                                 if (diagnostic != null) {
@@ -340,6 +357,50 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
             return "";
         }
         return description.replaceFirst("(?s)\\R-{3,}\\R.*$", "").trim();
+    }
+
+    /**
+     * Converts a NetBeans hint (error, warning, ...) to a diagnostic with its
+     * exact range.
+     *
+     * @return the diagnostic, or null if the hint has no message or range
+     */
+    Diagnostic fromErrorDescription(ErrorDescription error, StyledDocument doc) {
+        PositionBounds bounds = error.getRange();
+        if (bounds == null) {
+            return null;
+        }
+        return diagnosticFor(error.getDescription(), error.getSeverity(),
+                bounds.getBegin().getOffset(), bounds.getEnd().getOffset(), doc);
+    }
+
+    /**
+     * Builds a diagnostic for a hint covering the given document offsets.
+     *
+     * @return the diagnostic, or null if there is no message
+     */
+    Diagnostic diagnosticFor(String description, Severity hintSeverity, int start, int end, StyledDocument doc) {
+        String message = cleanMessage(description);
+        if (message.isEmpty()) {
+            return null;
+        }
+        String severity;
+        switch (hintSeverity) {
+            case ERROR:
+                severity = "error";
+                break;
+            case WARNING:
+                severity = "warning";
+                break;
+            default:
+                severity = "hint";
+        }
+        int from = Math.max(0, Math.min(start, doc.getLength()));
+        int to = Math.max(from, Math.min(end, doc.getLength()));
+        NbUtils.Position first = NbUtils.position(doc, from);
+        NbUtils.Position last = NbUtils.position(doc, to);
+        return createDiagnostic(message, severity, "hint".equals(severity) ? "editor" : "compiler", null,
+                range(first.line, first.character, last.line, last.character));
     }
 
     /**
