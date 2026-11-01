@@ -1,11 +1,13 @@
 package org.openbeans.claude.netbeans.tools;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.logging.Logger;
 import org.openbeans.claude.netbeans.tools.params.CloseTabParams;
 import org.openbeans.claude.netbeans.tools.params.CloseTabResult;
 import org.openbeans.claude.netbeans.tools.params.Content;
+import org.openide.filesystems.FileObject;
 import org.openide.loaders.DataObject;
 import org.openide.nodes.Node;
 import org.openide.util.Mutex;
@@ -33,36 +35,60 @@ public class CloseTab implements Tool<CloseTabParams, CloseTabResult> {
         return CloseTabParams.class;
     }
 
-    private TopComponent findTopComponent(String tabName) {
-        // Find the TopComponent by tab name
-        for (TopComponent tc : TopComponent.getRegistry().getOpened()) {
-            String displayName = tc.getDisplayName();
-            if (displayName != null && displayName.equals(tabName)) {
+    /**
+     * Finds the tab to close. Claude's own diff tabs with that exact name win;
+     * otherwise a tab whose display name or file name matches is used, but
+     * only if exactly one does, so an ambiguous name never closes the wrong
+     * file.
+     *
+     * @param tabName the requested tab name
+     * @param opened the open windows
+     * @return the tab, or null if none or several match
+     */
+    static TopComponent findTopComponent(String tabName, Collection<? extends TopComponent> opened) {
+        for (TopComponent tc : opened) {
+            if (tc instanceof ClaudeDiffTopComponent && tabName.equals(tc.getDisplayName())) {
                 return tc;
             }
         }
 
-        // If no exact match found, try to find by file name (without path)
-        for (TopComponent tc : TopComponent.getRegistry().getOpened()) {
-            Node[] nodes = tc.getActivatedNodes();
-            if (nodes != null && nodes.length > 0) {
-                DataObject dataObject = nodes[0].getLookup().lookup(DataObject.class);
-                if (dataObject != null) {
-                    String fileName = dataObject.getPrimaryFile().getName();
-                    if (fileName.equals(tabName) || (fileName + "." + dataObject.getPrimaryFile().getExt()).equals(tabName)) {
-                        return tc;
-                    }
-                }
+        List<TopComponent> matches = new ArrayList<>();
+        for (TopComponent tc : opened) {
+            if (tabName.equals(tc.getDisplayName()) || tabName.equals(fileNameOf(tc))
+                    || tabName.equals(baseNameOf(tc))) {
+                matches.add(tc);
             }
         }
+        if (matches.size() > 1) {
+            LOGGER.warning("Tab name '" + tabName + "' is ambiguous (" + matches.size() + " tabs match); not closing any");
+            return null;
+        }
+        return matches.isEmpty() ? null : matches.get(0);
+    }
 
-        return null;
+    private static FileObject fileOf(TopComponent tc) {
+        Node[] nodes = tc.getActivatedNodes();
+        if (nodes == null || nodes.length == 0) {
+            return null;
+        }
+        DataObject dataObject = nodes[0].getLookup().lookup(DataObject.class);
+        return dataObject != null ? dataObject.getPrimaryFile() : null;
+    }
+
+    private static String fileNameOf(TopComponent tc) {
+        FileObject file = fileOf(tc);
+        return file != null ? file.getNameExt() : null;
+    }
+
+    private static String baseNameOf(TopComponent tc) {
+        FileObject file = fileOf(tc);
+        return file != null ? file.getName() : null;
     }
 
     /* package proctected */ boolean closeTopComponent(String tabName) {
         // Window system calls must happen on the EDT
         return Mutex.EVENT.readAccess((Mutex.Action<Boolean>) () -> {
-            TopComponent tc = findTopComponent(tabName);
+            TopComponent tc = findTopComponent(tabName, TopComponent.getRegistry().getOpened());
             if (tc != null) {
                 tc.close();
                 return true;
