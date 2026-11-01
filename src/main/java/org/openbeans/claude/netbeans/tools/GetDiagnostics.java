@@ -4,7 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.File;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.swing.text.Document;
@@ -26,6 +28,7 @@ import org.openide.filesystems.FileUtil;
 import org.openide.loaders.DataObject;
 import org.openide.nodes.Node;
 import org.openide.windows.TopComponent;
+import org.openide.windows.WindowManager;
 
 /**
  * Tool to get diagnostic information (errors, warnings) for files.
@@ -177,43 +180,53 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
     }
     
     /**
-     * Gets diagnostics for all currently open files.
+     * Gets diagnostics for all files open in editor windows. Other windows
+     * (Projects, Navigator, ...) are skipped and each file is reported once,
+     * even if it is open in several editors.
      */
     private List<DiagnosticsResponse> getDiagnosticsForAllFiles() {
         try {
             List<DiagnosticsResponse> allResponses = new ArrayList<>();
-            
-            // Go through all open TopComponents (editor tabs)
-            for (TopComponent tc : TopComponent.getRegistry().getOpened()) {
-                Node[] nodes = tc.getActivatedNodes();
-                if (nodes != null && nodes.length > 0) {
-                    DataObject dataObject = nodes[0].getLookup().lookup(DataObject.class);
-                    if (dataObject != null) {
-                        FileObject fileObject = dataObject.getPrimaryFile();
-                        if (fileObject != null) {
-                            File file = FileUtil.toFile(fileObject);
-                            if (file != null) {
-                                List<Diagnostic> fileDiagnostics = extractDiagnosticsFromFile(file.getAbsolutePath());
-                                if (!fileDiagnostics.isEmpty()) {
-                                    DiagnosticsResponse response = new DiagnosticsResponse();
-                                    response.setUri(URI.create(NbUtils.toFileUri(file.getAbsolutePath())));
-                                    response.setDiagnostics(fileDiagnostics);
-                                    allResponses.add(response);
-                                }
-                            }
-                        }
-                    }
+            for (FileObject fileObject : openEditorFiles()) {
+                File file = FileUtil.toFile(fileObject);
+                if (file == null) {
+                    continue;
+                }
+                List<Diagnostic> fileDiagnostics = extractDiagnosticsFromFile(file.getAbsolutePath());
+                if (!fileDiagnostics.isEmpty()) {
+                    DiagnosticsResponse response = new DiagnosticsResponse();
+                    response.setUri(URI.create(NbUtils.toFileUri(file.getAbsolutePath())));
+                    response.setDiagnostics(fileDiagnostics);
+                    allResponses.add(response);
                 }
             }
-            
             return allResponses;
-            
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Failed to get diagnostics for all files", e);
             return new ArrayList<>();
         }
     }
-    
+
+    /** Files shown in open editor windows, each listed once. */
+    private static Set<FileObject> openEditorFiles() {
+        Set<FileObject> files = new LinkedHashSet<>();
+        WindowManager wm = WindowManager.getDefault();
+        for (TopComponent tc : TopComponent.getRegistry().getOpened()) {
+            if (!wm.isOpenedEditorTopComponent(tc)) {
+                continue;
+            }
+            Node[] nodes = tc.getActivatedNodes();
+            if (nodes == null || nodes.length == 0) {
+                continue;
+            }
+            DataObject dataObject = nodes[0].getLookup().lookup(DataObject.class);
+            if (dataObject != null && dataObject.getPrimaryFile() != null) {
+                files.add(dataObject.getPrimaryFile());
+            }
+        }
+        return files;
+    }
+
     /**
      * Extracts diagnostic information from a specific file using NetBeans editor annotations.
      */
@@ -317,43 +330,41 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
     }
 
     /**
+     * Removes the UI help NetBeans appends to hint descriptions, such as
+     * {@code "\n----\n(Alt-Enter shows hints)"}.
+     *
+     * @return the trimmed message, empty if there is none
+     */
+    static String cleanMessage(String description) {
+        if (description == null) {
+            return "";
+        }
+        return description.replaceFirst("(?s)\\R-{3,}\\R.*$", "").trim();
+    }
+
+    /**
      * Converts a NetBeans AnnotationDesc to a Diagnostic object.
      */
-    private Diagnostic convertAnnotationToDiagnostic(AnnotationDesc annotation,
+    Diagnostic convertAnnotationToDiagnostic(AnnotationDesc annotation,
                                                    Document doc, int line) {
         if (annotation == null) {
             return null;
         }
         
-        String message = annotation.getShortDescription();
-        if (message == null || message.trim().isEmpty()) {
+        String severity = severityOf(annotation.getAnnotationType());
+        if ("info".equals(severity)) {
+            // Not a problem marker: override/implements glyphs, bookmarks, breakpoints, ...
             return null;
         }
-        
-        String severity = severityOf(annotation.getAnnotationType());
-        String source;
-        switch (severity) {
-            case "error":
-            case "warning":
-                source = "compiler";
-                break;
-            case "hint":
-                source = "editor";
-                break;
-            default:
-                source = "netbeans";
+
+        String message = cleanMessage(annotation.getShortDescription());
+        if (message.isEmpty()) {
+            return null;
         }
 
-        // Try to extract error code if available
+        String source = "hint".equals(severity) ? "editor" : "compiler";
         String code = null;
-        if (message.contains("[") && message.contains("]")) {
-            int start = message.lastIndexOf("[");
-            int end = message.lastIndexOf("]");
-            if (start < end && start >= 0) {
-                code = message.substring(start + 1, end);
-            }
-        }
-        
+
         return createDiagnostic(message, severity, source, code,
                 rangeOf(doc, annotation.getOffset(), annotation.getLength(), line));
     }

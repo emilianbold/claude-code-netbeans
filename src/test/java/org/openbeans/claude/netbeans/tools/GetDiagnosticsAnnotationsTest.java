@@ -28,6 +28,10 @@ public class GetDiagnosticsAnnotationsTest {
     }
 
     private static AnnotationDesc annotation(String type, int offset, int line) {
+        return annotation(type, type, offset, line);
+    }
+
+    private static AnnotationDesc annotation(String type, String description, int offset, int line) {
         return new AnnotationDesc(offset, -1) {
             @Override
             public String getAnnotationType() {
@@ -36,7 +40,7 @@ public class GetDiagnosticsAnnotationsTest {
 
             @Override
             public String getShortDescription() {
-                return type;
+                return description;
             }
 
             @Override
@@ -82,5 +86,32 @@ public class GetDiagnosticsAnnotationsTest {
         assertEquals("hint", GetDiagnostics.severityOf(p + "hint_fixable"));
         assertEquals("info", GetDiagnostics.severityOf("org-netbeans-modules-debugger-Breakpoint"));
         assertEquals("info", GetDiagnostics.severityOf(null));
+    }
+
+    @Test
+    public void stripsNetBeansUiHelpFromMessages() {
+        assertEquals("cannot find symbol\n  symbol:   variable LOGGER",
+                GetDiagnostics.cleanMessage(
+                        "cannot find symbol\n  symbol:   variable LOGGER\n----\n(Alt-Enter shows hints)"));
+        assertEquals("plain", GetDiagnostics.cleanMessage("plain"));
+        assertEquals("", GetDiagnostics.cleanMessage(null));
+    }
+
+    @Test
+    public void reportsProblemsAndSkipsOtherMarkers() throws Exception {
+        BaseDocument doc = new BaseDocument(false, "text/plain");
+        doc.insertString(0, "void main(String[] args) {}\n", null);
+        GetDiagnostics tool = new GetDiagnostics();
+        String p = "org-netbeans-spi-editor-hints-parser_annotation_";
+
+        var error = tool.convertAnnotationToDiagnostic(annotation(p + "err",
+                "bad main(String[] args)\n----\n(Alt-Enter shows hints)", 0, 0), doc, 0);
+        assertEquals("bad main(String[] args)", error.getMessage());
+        assertEquals("compiler", error.getSource());
+        assertNull(error.getCode(), "no code is guessed from brackets in the message");
+
+        assertNull(tool.convertAnnotationToDiagnostic(annotation(
+                "org-netbeans-modules-java-editor-implements-annotation",
+                "Implements method from : Tool", 0, 0), doc, 0));
     }
 }
