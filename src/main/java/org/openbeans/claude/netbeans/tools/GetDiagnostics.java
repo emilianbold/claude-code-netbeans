@@ -12,6 +12,7 @@ import javax.swing.text.Element;
 import javax.swing.text.StyledDocument;
 import org.netbeans.editor.AnnotationDesc;
 import org.netbeans.editor.Annotations;
+import org.netbeans.editor.BaseDocument;
 import org.openbeans.claude.netbeans.NbUtils;
 import org.openbeans.claude.netbeans.tools.params.Diagnostic;
 import org.openbeans.claude.netbeans.tools.params.DiagnosticsResponse;
@@ -230,39 +231,11 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
                     
                     if (editorCookie != null) {
                         Document doc = editorCookie.getDocument();
-                        if (doc != null) {
-                            // Get the annotations for this document
-                            Annotations annotations = (Annotations) doc.getProperty(Annotations.class);
-                            
-                            if (annotations != null) {
-                                // Iterate through lines with annotations using NetBeans API
-                                int currentLine = annotations.getNextLineWithAnnotation(-1); // Start from the beginning
-                                
-                                while (currentLine != -1) {
-                                    // Get the active annotation for this line
-                                    AnnotationDesc activeAnnotation = annotations.getActiveAnnotation(currentLine);
-                                    if (activeAnnotation != null) {
-                                        Diagnostic diagnostic = convertAnnotationToDiagnostic(
-                                            activeAnnotation, doc, currentLine);
-                                        if (diagnostic != null) {
-                                            diagnostics.add(diagnostic);
-                                        }
-                                    }
-                                    
-                                    // Get all passive annotations for this line
-                                    AnnotationDesc[] passiveAnnotations = annotations.getPassiveAnnotationsForLine(currentLine);
-                                    if (passiveAnnotations != null) {
-                                        for (AnnotationDesc annotation : passiveAnnotations) {
-                                            Diagnostic diagnostic = convertAnnotationToDiagnostic(
-                                                annotation, doc, currentLine);
-                                            if (diagnostic != null) {
-                                                diagnostics.add(diagnostic);
-                                            }
-                                        }
-                                    }
-                                    
-                                    // Move to the next line with annotations
-                                    currentLine = annotations.getNextLineWithAnnotation(currentLine);
+                        if (doc instanceof BaseDocument) {
+                            for (LineAnnotation a : annotationsOf(((BaseDocument) doc).getAnnotations())) {
+                                Diagnostic diagnostic = convertAnnotationToDiagnostic(a.annotation, doc, a.line);
+                                if (diagnostic != null) {
+                                    diagnostics.add(diagnostic);
                                 }
                             }
                         }
@@ -276,6 +249,73 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
         return diagnostics;
     }
     
+    /** An annotation together with the zero-based line it is attached to. */
+    static final class LineAnnotation {
+        final AnnotationDesc annotation;
+        final int line;
+
+        LineAnnotation(AnnotationDesc annotation, int line) {
+            this.annotation = annotation;
+            this.line = line;
+        }
+    }
+
+    /**
+     * Collects every annotation (active and passive) of a document.
+     * {@link Annotations#getNextLineWithAnnotation(int)} returns the first
+     * annotated line at or after its argument, so the search continues from
+     * the following line.
+     */
+    static List<LineAnnotation> annotationsOf(Annotations annotations) {
+        List<LineAnnotation> result = new ArrayList<>();
+        if (annotations == null) {
+            return result;
+        }
+        int line = annotations.getNextLineWithAnnotation(0);
+        while (line >= 0) {
+            AnnotationDesc active = annotations.getActiveAnnotation(line);
+            if (active != null) {
+                result.add(new LineAnnotation(active, line));
+            }
+            AnnotationDesc[] passive = annotations.getPassiveAnnotationsForLine(line);
+            if (passive != null) {
+                for (AnnotationDesc annotation : passive) {
+                    result.add(new LineAnnotation(annotation, line));
+                }
+            }
+            int next = annotations.getNextLineWithAnnotation(line + 1);
+            if (next <= line) {
+                break;
+            }
+            line = next;
+        }
+        return result;
+    }
+
+    /**
+     * Maps a NetBeans annotation type to a severity. Java errors and warnings
+     * use types such as {@code org-netbeans-spi-editor-hints-parser_annotation_err}
+     * and {@code ..._warn}.
+     *
+     * @return "error", "warning", "hint" or "info"
+     */
+    static String severityOf(String annotationType) {
+        if (annotationType == null) {
+            return "info";
+        }
+        String type = annotationType.toLowerCase();
+        if (type.contains("_err") || type.contains("error")) {
+            return "error";
+        }
+        if (type.contains("warn")) {
+            return "warning";
+        }
+        if (type.contains("hint") || type.contains("verifier")) {
+            return "hint";
+        }
+        return "info";
+    }
+
     /**
      * Converts a NetBeans AnnotationDesc to a Diagnostic object.
      */
@@ -290,25 +330,20 @@ public class GetDiagnostics implements Tool<GetDiagnosticsParams, String> {
             return null;
         }
         
-        // Try to determine severity from annotation type
-        String severity = "info"; // default
-        String annotationType = annotation.getAnnotationType();
-        String source = "netbeans";
-        
-        if (annotationType != null) {
-            String lowerType = annotationType.toLowerCase();
-            if (lowerType.contains("error")) {
-                severity = "error";
+        String severity = severityOf(annotation.getAnnotationType());
+        String source;
+        switch (severity) {
+            case "error":
+            case "warning":
                 source = "compiler";
-            } else if (lowerType.contains("warning") || lowerType.contains("warn")) {
-                severity = "warning";
-                source = "compiler";
-            } else if (lowerType.contains("hint")) {
-                severity = "hint";
+                break;
+            case "hint":
                 source = "editor";
-            }
+                break;
+            default:
+                source = "netbeans";
         }
-        
+
         // Try to extract error code if available
         String code = null;
         if (message.contains("[") && message.contains("]")) {
