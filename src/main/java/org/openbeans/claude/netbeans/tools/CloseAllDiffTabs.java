@@ -7,6 +7,7 @@ import java.util.logging.Logger;
 import org.openbeans.claude.netbeans.tools.params.CloseAllDiffTabsParams;
 import org.openbeans.claude.netbeans.tools.params.CloseAllDiffTabsResult;
 import org.openbeans.claude.netbeans.tools.params.Content;
+import org.openide.util.Mutex;
 import org.openide.windows.TopComponent;
 
 public class CloseAllDiffTabs implements Tool<CloseAllDiffTabsParams, CloseAllDiffTabsResult> {
@@ -28,42 +29,26 @@ public class CloseAllDiffTabs implements Tool<CloseAllDiffTabsParams, CloseAllDi
         return CloseAllDiffTabsParams.class;
     }
 
+    /**
+     * Closes all diff tabs opened by Claude Code. Other windows, including
+     * NetBeans' own diff viewers, are left alone. Closing a pending diff
+     * rejects it.
+     */
     /* package protected */ int closeAllDiffTabs() {
-        int closedCount = 0;
-
-        // Get all open TopComponents and look for diff viewers
-        for (TopComponent tc : TopComponent.getRegistry().getOpened()) {
-            String displayName = tc.getDisplayName();
-            String name = tc.getName();
-
-            // Look for components that might be diff viewers
-            // NetBeans diff viewers typically have names containing "diff" or similar patterns
-            if (displayName != null && (displayName.toLowerCase().contains("diff")
-                    || displayName.contains(" vs ") || displayName.contains(" - "))) {
-                try {
-                    tc.close();
-                    closedCount++;
-                    LOGGER.log(Level.FINE, "Closed diff tab: {0}", displayName);
-                } catch (Exception e) {
-                    LOGGER.log(Level.WARNING, "Failed to close diff tab: " + displayName, e);
+        return Mutex.EVENT.readAccess((Mutex.Action<Integer>) () -> {
+            int closedCount = 0;
+            for (TopComponent tc : new ArrayList<>(TopComponent.getRegistry().getOpened())) {
+                if (tc instanceof ClaudeDiffTopComponent) {
+                    if (tc.close()) {
+                        closedCount++;
+                        LOGGER.log(Level.FINE, "Closed diff tab: {0}", tc.getDisplayName());
+                    } else {
+                        LOGGER.log(Level.WARNING, "Failed to close diff tab: {0}", tc.getDisplayName());
+                    }
                 }
             }
-
-            // Also check by class name for known diff viewer classes
-            String className = tc.getClass().getSimpleName();
-            if (className.toLowerCase().contains("diff")
-                    || className.toLowerCase().contains("compare")) {
-                try {
-                    tc.close();
-                    closedCount++;
-                    LOGGER.log(Level.FINE, "Closed diff component: {0}", className);
-                } catch (Exception e) {
-                    LOGGER.log(Level.WARNING, "Failed to close diff component: " + className, e);
-                }
-            }
-        }
-
-        return closedCount;
+            return closedCount;
+        });
     }
 
     @Override

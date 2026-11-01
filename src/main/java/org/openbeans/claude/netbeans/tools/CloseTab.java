@@ -8,6 +8,7 @@ import org.openbeans.claude.netbeans.tools.params.CloseTabResult;
 import org.openbeans.claude.netbeans.tools.params.Content;
 import org.openide.loaders.DataObject;
 import org.openide.nodes.Node;
+import org.openide.util.Mutex;
 import org.openide.windows.TopComponent;
 
 /**
@@ -59,14 +60,15 @@ public class CloseTab implements Tool<CloseTabParams, CloseTabResult> {
     }
 
     /* package proctected */ boolean closeTopComponent(String tabName) {
-        TopComponent tc = findTopComponent(tabName);
-        if (tc != null) {
-            // Close the tab
-            tc.close();
-            return true;
-        } else {
+        // Window system calls must happen on the EDT
+        return Mutex.EVENT.readAccess((Mutex.Action<Boolean>) () -> {
+            TopComponent tc = findTopComponent(tabName);
+            if (tc != null) {
+                tc.close();
+                return true;
+            }
             return false;
-        }
+        });
     }
 
     @Override

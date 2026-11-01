@@ -49,8 +49,6 @@ import org.openbeans.claude.netbeans.tools.GetWorkspaceFolders;
 import org.openbeans.claude.netbeans.tools.OpenDiff;
 import org.openbeans.claude.netbeans.tools.OpenFile;
 import org.openbeans.claude.netbeans.tools.SaveDocument;
-import org.openbeans.claude.netbeans.tools.params.Content;
-import org.openbeans.claude.netbeans.tools.params.OpenDiffResult;
 
 /**
  * Handles Model Context Protocol messages and provides NetBeans IDE capabilities
@@ -554,12 +552,10 @@ public class NetBeansMCPHandler {
             @Override
             public void propertyChange(PropertyChangeEvent evt) {
                 if (TopComponent.Registry.PROP_TC_CLOSED.equals(evt.getPropertyName())) {
-                    TopComponent closed = (TopComponent) evt.getNewValue();
+                    Object closed = evt.getNewValue();
                     if (closed != null) {
-                        String tabName = closed.getDisplayName();
-                        if (tabName != null && DiffTabTracker.isTracked(tabName)) {
-                            handleDiffTabClosed(tabName);
-                        }
+                        // No-op if the diff was already accepted or superseded
+                        DiffTabTracker.reject(closed);
                     }
                 }
             }
@@ -578,24 +574,6 @@ public class NetBeansMCPHandler {
             diffTabListener = null;
         }
         LOGGER.log(Level.FINE, "Stopped diff tab tracking");
-    }
-
-    /**
-     * Handles a diff tab being closed, sending the async response.
-     */
-    private void handleDiffTabClosed(String tabName) {
-        AsyncHandler handler = DiffTabTracker.remove(tabName);
-        if (handler != null) {
-            LOGGER.log(Level.INFO, "Diff tab closed: {0}", tabName);
-
-            // Create response with DIFF_REJECTED status
-            List<Content> contentList = new ArrayList<>();
-            contentList.add(new Content("text", "DIFF_REJECTED"));
-            contentList.add(new Content("text", tabName));
-            OpenDiffResult result = new OpenDiffResult(contentList);
-
-            handler.sendResponse(result);
-        }
     }
 
     /**
